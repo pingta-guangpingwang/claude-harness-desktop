@@ -1,0 +1,362 @@
+/* ===========================================================================
+   全局基础样式 — 使用 CSS 变量，由 ThemeContext 设置
+   =========================================================================== */
+
+/* 默认主题 (VSCode Dark+) — 在 ThemeProvider 挂载前使用 */
+:root {
+  --app-bg-primary: #1e1e1e;
+  --app-bg-secondary: #252526;
+  --app-bg-tertiary: #2d2d2d;
+  --app-bg-input: #3c3c3c;
+  --app-bg-assistant: #2d2d30;
+  --app-bg-system: #252526;
+  --app-bg-user: #007acc;
+  --app-bg-log: #1a1a1a;
+  --app-bg-status: #007acc;
+  --app-bg-header: #252526;
+  --app-text-primary: #cccccc;
+  --app-text-secondary: #858585;
+  --app-text-assistant: #d4d4d4;
+  --app-text-system: #858585;
+  --app-text-user: #ffffff;
+  --app-text-log: #a0a0a0;
+  --app-text-placeholder: #5a5a5a;
+  --app-border-primary: #3c3c3c;
+  --app-border-secondary: #333333;
+  --app-border-input: #3c3c3c;
+  --app-accent: #007acc;
+  --app-accent-hover: #1a8ad4;
+  --app-success: #4ec9b0;
+  --app-warning: #cca700;
+  --app-danger: #f44747;
+  --app-info: #3794ff;
+  --app-font-mono: "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas", monospace;
+  --app-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --app-font-size-sm: 11px;
+  --app-font-size: 13px;
+  --app-font-size-lg: 14px;
+  --scrollbar-thumb: #424242;
+  --scrollbar-track: transparent;
+}
+
+body {
+  margin: 0;
+  font-family: var(--app-font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--app-bg-primary, #f8fafc);
+  color: var(--app-text-primary, #1f2937);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button, input, select, textarea {
+  font: inherit;
+}
+
+button {
+  border: none;
+  background: none;
+  color: inherit;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  font-weight: 500;
+}
+
+input {
+  padding: 8px 12px;
+  border: 1px solid var(--app-border-input, #d1d5db);
+  border-radius: 6px;
+  background: var(--app-bg-input, #ffffff);
+  color: var(--app-text-primary, #1f2937);
+}
+
+/* 滚动条主题适配 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, #cbd5e1);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track, transparent);
+}
+
+/* Setup Screen */
+.setup-screen {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  flex-direction: column;
+}
+
+.setup-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+}
+
+.setup-logo h1 {
+  font-size: 3rem;
+  color: white;
+  margin: 0 0 10px;
+  font-weight: 700;
+}
+
+.setup-logo p {
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, 0.8);
+  margin: 0 0 10px;
+}
+
+.setup-subtitle {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0 0 40px;
+}
+
+.setup-card {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
+  padding: 40px;
+  max-width: 600px;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 30px;
+}
+
+.setup-card h2 {
+  color: white;
+  margin: 0 0 15px;
+  font-size: 1.8rem;
+}
+
+.setup-card p {
+  color: rgba(255, 255, 255, 0.8);
+  margin: 0 0 25px;
+  line-height: 1.6;
+}
+
+.path-display {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: left;
+}
+
+.path-display strong {
+  color: white;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.path-display span {
+  color: rgba(255, 255, 255, 0.9);
+  word-break: break-all;
+  display: block;
+  margin-bottom: 15px;
+}
+
+.primary-button {
+  background: linear-gradient(135deg, #4f46e5, #2563eb);
+  border: none;
+  color: white;
+  padding: 12px 28px;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.primary-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(59, 130, 246, 0.3);
+}
+
+.primary-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Project Selector */
+.selector-screen {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f8fafc;
+}
+
+.selector-header {
+  background: white;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 16px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.selector-header h1 {
+  margin: 0;
+  font-size: 1.4rem;
+  color: #1f2937;
+}
+
+.selector-content {
+  flex: 1;
+  padding: 24px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.selector-info {
+  background: white;
+  border-radius: 12px;
+  padding: 16px 20px;
+  border: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.selector-info span {
+  font-size: 14px;
+  color: #374151;
+}
+
+.selector-info .root-path {
+  font-size: 12px;
+  color: #6b7280;
+  font-family: monospace;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selector-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.selector-project-card {
+  background: white;
+  border-radius: 10px;
+  padding: 14px 18px;
+  border: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: box-shadow 0.15s;
+}
+
+.selector-project-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.selector-project-card.in-farm {
+  border-color: #c4b5fd;
+  background: #faf9ff;
+}
+
+.selector-project-info h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  color: #1f2937;
+}
+
+.selector-project-info span {
+  font-size: 11px;
+  color: #9ca3af;
+  font-family: monospace;
+}
+
+.selector-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.selector-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: #9ca3af;
+}
+
+.selector-empty h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: #374151;
+}
+
+/* Horse Farm Page */
+.horsefarm-page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f8fafc;
+  overflow: hidden;
+}
+
+.hf-header {
+  background: white;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.hf-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.hf-header-left h1 {
+  margin: 0;
+  font-size: 1.3rem;
+  color: #1f2937;
+}
+
+.hf-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lang-toggle {
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  color: #374151;
+}
+
+.lang-toggle:hover {
+  background: #f3f4f6;
+}

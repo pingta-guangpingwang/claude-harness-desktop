@@ -1,0 +1,78 @@
+/* ========== Resource Hub ========== */
+.eco-resource-hub { display: flex; flex-direction: column; height: 100%; }
+.eco-rh-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.eco-rh-header h3 { margin: 0; font-size: 16px; }
+.eco-rh-actions { display: flex; gap: 8px; align-items: center; }
+.eco-rh-search {
+  background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+  padding: 6px 10px; border-radius: 6px; font-size: 12px; width: 200px;
+}
+.eco-rh-filter {
+  background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+  padding: 6px 10px; border-radius: 6px; font-size: 12px;
+}
+.eco-btn {
+  padding: 6px 14px; border-radius: 6px; border: 1px solid #334155;
+  background: #1e293b; color: #e2e8f0; cursor: pointer; font-size: 12px;
+}
+.eco-btn:hover { background: #334155; }
+.eco-btn:disabled { opacity: 0.5; cursor: default; }
+.eco-btn-primary { background: #6366f1; border-color: #6366f1; color: #fff; }
+.eco-btn-primary:hover { background: #4f46e5; }
+.eco-btn-text { padding: 4px 8px; border: none; background: transparent; color: #6366f1; cursor: pointer; font-size: 11px; }
+.eco-btn-text:hover { color: #818cf8; }
+
+.eco-rh-body { display: flex; flex: 1; gap: 16px; overflow: hidden; }
+.eco-rh-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; align-content: start; }
+.eco-rh-card {
+  display: flex; gap: 10px; padding: 12px; border: 1px solid #1e293b; border-radius: 8px;
+  cursor: pointer; align-items: center;
+}
+.eco-rh-card:hover { background: #1e293b; }
+.eco-rh-card.selected { border-color: #6366f1; background: #6366f108; }
+.eco-rh-card-icon { font-size: 22px; }
+.eco-rh-card-info { flex: 1; min-width: 0; }
+.eco-rh-card-name { font-size: 12px; font-weight: 600; }
+.eco-rh-card-project { font-size: 10px; color: #6366f1; }
+.eco-rh-card-path { font-size: 10px; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eco-rh-card-type { font-size: 10px; font-weight: 600; white-space: nowrap; }
+.eco-rh-detail {
+  width: 240px; border-left: 1px solid #1e293b; padding-left: 16px;
+}
+.eco-rh-detail h5 { margin: 0 0 10px; font-size: 13px; }
+.eco-rh-detail-row { display: flex; justify-content: space-between; margin-bottom: 6px; }
+.eco-rh-detail-row label { font-size: 10px; color: #64748b; }
+.eco-rh-detail-row span { font-size: 10px; color: #e2e8f0; text-align: right; max-width: 140px; word-break: break-all; }
+.eco-rh-detail-actions { margin-top: 12px; }
+.eco-empty { grid-column: 1 / -1; text-align: center; color: #475569; padding: 40px; font-size: 12px; }
+
+/* ========== Config Migrator ========== */
+.eco-migrator { display: flex; flex-direction: column; height: 100%; max-width: 800px; margin: 0 auto; }
+.eco-mig-header { margin-bottom: 20px; }
+.eco-mig-header h3 { margin: 0 0 4px; font-size: 16px; }
+.eco-mig-desc { margin: 0; font-size: 12px; color: #64748b; }
+.eco-mig-project-select { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+.eco-mig-field { flex: 1; }
+.eco-mig-field label { display: block; font-size: 11px; color: #64748b; margin-bottom: 4px; }
+.eco-mig-field select {
+  width: 100%; background: #1e293b; border: 1px solid #334155; color: #e2e8f0;
+  padding: 8px 10px; border-radius: 6px; font-size: 12px; margin-bottom: 8px;
+}
+.eco-mig-arrow { padding-top: 24px; font-size: 20px; }
+.eco-mig-config-list { border: 1px solid #1e293b; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+.eco-mig-config-list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.eco-mig-config-list-header h5 { margin: 0; font-size: 12px; }
+.eco-mig-config-list-actions { display: flex; gap: 8px; }
+.eco-mig-config-item { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid #1e293b33; cursor: pointer; }
+.eco-mig-config-item:last-child { border-bottom: none; }
+.eco-mig-config-info { flex: 1; }
+.eco-mig-config-name { display: block; font-size: 12px; }
+.eco-mig-config-path { display: block; font-size: 10px; color: #475569; font-family: monospace; }
+.eco-mig-step-status { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+.eco-mig-step-status.done { color: #10b981; }
+.eco-mig-step-status.skipped { color: #f59e0b; }
+.eco-mig-step-status.error { color: #ef4444; }
+.eco-mig-step-status.migrating { color: #6366f1; }
+.eco-mig-status { font-size: 12px; color: #94a3b8; margin-bottom: 12px; }
+.eco-mig-summary { display: flex; gap: 16px; font-size: 12px; margin-bottom: 12px; }
+.eco-mig-actions { display: flex; gap: 8px; }

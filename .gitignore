@@ -1,0 +1,32 @@
+node_modules/
+nodejs/
+dist/
+out/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+npm-debug.log*
+.env
+.env.local
+*.exe
+*.dmg
+*.AppImage
+
+# DBHT version control
+objects/
+commits/
+.dbvs/
+.dbvs-link.json
+
+# Claude Code session
+.claude/
+
+# Compiled JS (TS source in electron/)
+electron/**/*.js
+electron/**/*.js.map
+
+# User config
+config.json

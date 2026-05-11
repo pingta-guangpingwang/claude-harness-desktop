@@ -1,0 +1,7 @@
+[
+  {
+    "alias": "ws",
+    "expandsTo": "wake",
+    "description": "快捷唤醒"
+  }
+]

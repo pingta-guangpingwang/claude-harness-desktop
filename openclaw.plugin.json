@@ -1,0 +1,47 @@
+{
+  "name": "deepblue-dev-workbench",
+  "version": "3.0.0",
+  "description": "Claude Harness Desktop — CLI 命令/工作流/角色系统/效率仪表盘",
+  "author": "DeepBlue Team",
+  "license": "MIT",
+  "provides": [
+    "cli.command-registry",
+    "cli.batch-runner",
+    "workflow.editor",
+    "workflow.engine",
+    "role.identity-system",
+    "dashboard.efficiency",
+    "template.library",
+    "rule.engine"
+  ],
+  "consumes": [
+    "gateway.rpc",
+    "agent.execute",
+    "audit.log",
+    "model.router"
+  ],
+  "permissions": [
+    "filesystem:read",
+    "filesystem:write",
+    "dbht:execute",
+    "ai:call",
+    "process:spawn"
+  ],
+  "hooks": [
+    "before_tool_call",
+    "after_tool_call",
+    "agent_end",
+    "session_start"
+  ],
+  "tools": [
+    "cli.execute",
+    "cli.batch",
+    "workflow.run",
+    "template.apply",
+    "rule.evaluate"
+  ],
+  "entry": {
+    "main": "dist/plugin/index.js",
+    "renderer": "dist/renderer.py"
+  }
+}
