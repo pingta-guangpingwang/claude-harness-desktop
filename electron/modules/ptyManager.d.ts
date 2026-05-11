@@ -14,6 +14,7 @@ interface PtySession {
     pty: PtyProcess;
     sessionId: string;
     projectPath: string;
+    lastDataAt: number;
 }
 /** 获取会话表（供 harnessAgent 工具直接调用） */
 export declare function getSessions(): Map<string, PtySession>;
@@ -47,6 +48,7 @@ export declare function getPtyStatus(projectPath: string): {
     connected: boolean;
     sessionId: string | null;
     pid: number | null;
+    lastDataAt: number;
 };
 export declare function registerPtyIpc(window: BrowserWindow): void;
 export {};

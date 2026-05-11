@@ -46,9 +46,7 @@ export class WindowManager {
 
     this.mainWindow.once('ready-to-show', () => {
       this.mainWindow?.show()
-      if (process.env.NODE_ENV === 'development') {
-        this.mainWindow?.webContents.openDevTools({ mode: 'bottom' })
-      }
+      // DevTools: 按 F12 手动打开
     })
 
     this.mainWindow.on('close', (e) => {

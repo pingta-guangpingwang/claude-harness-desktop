@@ -1,11 +1,11 @@
 // 驾驭智能体 — 内置工具实现
 import type { AgentTool, AgentContext, ToolResult } from './types'
-import { registerTool } from './toolRegistry'
+import { registerTool, getAllTools, executeTool } from './toolRegistry'
 import { spawnPtySession, killPtySession, getPtyStatus, writeToPty, sendAndCollect } from '../modules/ptyManager.js'
 import { taskQueue, type AgentTask } from './taskQueue.js'
 import fs from 'fs'
 import path from 'path'
-import { execSync } from 'child_process'
+
 
 // ============== P0 核心控制工具 ==============
 
@@ -103,24 +103,38 @@ const stopProjectsTool: AgentTool = {
 
 const checkStatusTool: AgentTool = {
   name: 'check_status',
-  description: '检查全部项目的心跳状态（实时查询 PTY 连接状态），包括在线/离线/工作中/空闲。',
+  description: '检查全部项目的心跳状态（实时查询 PTY 连接状态+最后活跃时间），用于判断哪些项目正在工作中、哪些空闲、哪些离线。派发任务后用此工具轮询项目状态。',
   parameters: { type: 'object', properties: {} },
   group: 'control',
   isReadOnly: true,
   isConcurrencySafe: true,
   async execute(_params, ctx): Promise<ToolResult> {
+    const now = Date.now()
     const lines: string[] = []
     let online = 0
+    let working = 0
     for (const id of ctx.projectIds) {
       const name = ctx.projectNames.get(id) || id.split('\\').pop() || id
       const ptyStatus = getPtyStatus(id)
       const isOnline = ptyStatus.connected
       if (isOnline) online++
-      const status = isOnline ? '🟢 在线' : '🔴 离线'
-      const detail = isOnline && ptyStatus.pid ? ` (PID ${ptyStatus.pid})` : ''
+      const secSinceLastData = ptyStatus.lastDataAt > 0 ? Math.floor((now - ptyStatus.lastDataAt) / 1000) : 99999
+      const isWorking = isOnline && secSinceLastData < 30
+      if (isWorking) working++
+      let status: string
+      if (!isOnline) {
+        status = '🔴 离线'
+      } else if (isWorking) {
+        status = '🟢 工作中'
+      } else if (secSinceLastData < 300) {
+        status = `🟡 空闲(${secSinceLastData}s前有活动)`
+      } else {
+        status = `⚪ 无活动(${Math.floor(secSinceLastData / 60)}min前)`
+      }
+      const detail = isOnline && ptyStatus.pid ? ` PID:${ptyStatus.pid}` : ''
       lines.push(`${status} — ${name}${detail}`)
     }
-    lines.unshift(`总计: ${online}/${ctx.projectIds.length} 在线（实时 PTY 状态）`)
+    lines.unshift(`总计: ${online}/${ctx.projectIds.length} 在线, ${working} 工作中`)
     return { success: true, output: lines.join('\n') }
   },
 }
@@ -164,7 +178,7 @@ const broadcastTool: AgentTool = {
         }
 
         // 发送任务并等待回复（最长 90s）
-        const result = await sendAndCollect(id, task, 90000)
+        const result = await sendAndCollect(id, task, 120000)
 
         if (result.success && result.output) {
           // 推送项目回复到驾驭对话
@@ -193,8 +207,20 @@ const broadcastTool: AgentTool = {
       results.push(r.output)
     }
 
+    // 统计需要继续等待的项目
+    const pendingProjects: string[] = []
+    for (const r of allResults) {
+      if (r.ok && r.output.includes('已派发但无回复')) {
+        pendingProjects.push(r.name)
+      }
+    }
+    let pendingNote = ''
+    if (pendingProjects.length > 0) {
+      pendingNote = `\n\n⏳ ${pendingProjects.length} 个项目可能仍在处理中: ${pendingProjects.join(', ')}\n💡 使用 poll_projects 等待它们完成，或使用 read_project_chat 查看进度。`
+    }
+
     results.unshift(`已向 ${okCount}/${ctx.projectIds.length} 个项目广播任务: "${task.slice(0, 100)}${task.length > 100 ? '...' : ''}"`)
-    return { success: true, output: results.join('\n') }
+    return { success: true, output: results.join('\n') + pendingNote }
   },
 }
 
@@ -254,7 +280,7 @@ const taskProjectTool: AgentTool = {
       }
 
       // 发送任务并等待项目 AI 回复（最长 90s）
-      const result = await sendAndCollect(match, task, 90000)
+      const result = await sendAndCollect(match, task, 120000)
 
       if (result.success && result.output) {
         // B3: 反馈解析 — 检测成功/失败/需人工介入
@@ -299,7 +325,7 @@ const taskProjectTool: AgentTool = {
 
         return { success: true, output: `${statusTag} ${name}:\n${preview}${suffix}${autoFollowUp}` }
       }
-      return { success: result.success, output: `⚠️ ${name}: 已派发但无回复` }
+      return { success: result.success, output: `⚠️ ${name}: 已派发但无回复\n💡 使用 poll_projects 等待项目 AI 回复，或用 read_project_chat 查看实时进度。` }
     } catch (err) {
       return { success: false, output: `❌ ${name}: ${String(err)}` }
     }
@@ -307,6 +333,77 @@ const taskProjectTool: AgentTool = {
 }
 
 // ============== P1.5 任务队列工具 ==============
+
+const pollProjectsTool: AgentTool = {
+  name: 'poll_projects',
+  description: '低开销轮询指定项目的 PTY 活跃状态，等待指定秒数后返回每个项目的最近活动时间。用于在派发任务后等待项目 AI 回复，不消耗大量 token。每轮等待 20-40 秒，建议最多 6 轮。',
+  parameters: {
+    type: 'object',
+    properties: {
+      project_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '要轮询的项目路径列表。为空则轮询全部项目。',
+      },
+      wait_seconds: {
+        type: 'number',
+        description: '等待秒数后返回结果，默认 25 秒（范围 10-60）',
+      },
+    },
+  },
+  group: 'control',
+  isReadOnly: true,
+  isConcurrencySafe: false,
+  async execute(params, ctx): Promise<ToolResult> {
+    const requested = params.project_paths as string[] | undefined
+    const paths = (requested && requested.length > 0) ? requested : ctx.projectIds
+    const waitSec = Math.max(10, Math.min(60, (params.wait_seconds as number) || 25))
+
+    // 记录等待前的状态
+    const before = new Map<string, number>()
+    for (const id of paths) {
+      const s = getPtyStatus(id)
+      before.set(id, s.lastDataAt)
+    }
+
+    // 等待
+    await new Promise(r => setTimeout(r, waitSec * 1000))
+
+    // 检查等待后的状态
+    const now = Date.now()
+    const lines: string[] = [`⏱️ 等待 ${waitSec}s 后项目状态:`]
+    let activeCount = 0
+    let changedCount = 0
+
+    for (const id of paths) {
+      const name = ctx.projectNames.get(id) || id.split('\\').pop() || id
+      const s = getPtyStatus(id)
+      if (!s.connected) {
+        lines.push(`  🔴 ${name}: 离线`)
+        continue
+      }
+      const secSinceLastData = s.lastDataAt > 0 ? Math.floor((now - s.lastDataAt) / 1000) : 99999
+      const prevLastData = before.get(id) || 0
+      const hasNewData = s.lastDataAt > prevLastData
+
+      if (secSinceLastData < 15) {
+        lines.push(`  🟢 ${name}: 活跃中 (${secSinceLastData}s前有数据)${hasNewData ? ' ← 本轮有新数据' : ''}`)
+        activeCount++
+        if (hasNewData) changedCount++
+      } else if (secSinceLastData < 60) {
+        lines.push(`  🟡 ${name}: 可能已完成 (${secSinceLastData}s前最后活动)${hasNewData ? ' ← 本轮有新数据' : ''}`)
+        if (hasNewData) changedCount++
+      } else if (secSinceLastData < 300) {
+        lines.push(`  ⚪ ${name}: 空闲 ${Math.floor(secSinceLastData / 60)}min`)
+      } else {
+        lines.push(`  💤 ${name}: 长时间无活动 ${Math.floor(secSinceLastData / 60)}min`)
+      }
+    }
+
+    lines.unshift(`活跃: ${activeCount}/${paths.length}, 本轮新数据: ${changedCount}`)
+    return { success: true, output: lines.join('\n') }
+  },
+}
 
 const queueStatusTool: AgentTool = {
   name: 'queue_status',
@@ -633,106 +730,207 @@ const healthReportTool: AgentTool = {
   },
 }
 
-// ============== P1 文件/Shell 工具 ==============
+// ============== P2 验收 & 交付工具 ==============
 
-const readFileTool: AgentTool = {
-  name: 'read_file',
-  description: '读取项目中的文件内容。',
+const verifyProjectTool: AgentTool = {
+  name: 'verify_project',
+  description: '验收指定项目的工作成果：运行 lint/typecheck/audit/test 等插件检查，返回 pass/fail 报告。用于项目 AI 报告任务完成后，CEO 考核其输出质量。有失败项时自动建议打回修复。',
   parameters: {
     type: 'object',
     properties: {
-      file_path: { type: 'string', description: '要读取的文件绝对路径' },
-      limit_lines: { type: 'number', description: '最多读取行数，默认 500' },
+      project_path: {
+        type: 'string',
+        description: '要验收的项目绝对路径',
+      },
+      checks: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '要运行的检查类型: lint, typecheck, audit, test, format。默认全部。',
+      },
     },
-    required: ['file_path'],
+    required: ['project_path'],
   },
-  group: 'read',
+  group: 'control',
   isReadOnly: true,
-  isConcurrencySafe: true,
-  core: false,
-  async execute(params): Promise<ToolResult> {
-    const filePath = params.file_path as string
-    const limit = (params.limit_lines as number) || 500
-    try {
-      if (!fs.existsSync(filePath)) {
-        return { success: false, output: `文件不存在: ${filePath}` }
+  isConcurrencySafe: false,
+  async execute(params, ctx): Promise<ToolResult> {
+    const targetPath = params.project_path as string
+    const checks = (params.checks as string[]) || ['lint', 'typecheck', 'audit', 'test', 'format']
+
+    // 匹配项目路径
+    let match = ctx.projectIds.find(id => id === targetPath || id.toLowerCase() === targetPath.toLowerCase())
+    if (!match) {
+      for (const [id, name] of ctx.projectNames) {
+        if (name === targetPath || id.includes(targetPath)) { match = id; break }
       }
-      const content = fs.readFileSync(filePath, 'utf-8')
-      const lines = content.split('\n')
-      const truncated = lines.slice(0, limit).join('\n')
-      const suffix = lines.length > limit ? `\n... (共 ${lines.length} 行，已截取前 ${limit} 行)` : ''
-      return { success: true, output: truncated + suffix }
-    } catch (err) {
-      return { success: false, output: `读取失败: ${String(err)}` }
     }
+    if (!match) {
+      return { success: false, output: `未找到项目: ${targetPath}` }
+    }
+    const name = ctx.projectNames.get(match) || match.split('\\').pop() || match
+
+    // 从注册表查找可用的验证插件工具 (core: false = 插件工具)
+    const allTools = getAllTools()
+    const verifyTools = allTools.filter(t => t.core === false)
+
+    // 按检查类型匹配工具
+    const checkMap: Record<string, string[]> = {
+      lint: [],
+      typecheck: [],
+      audit: [],
+      test: [],
+      format: [],
+    }
+
+    for (const t of verifyTools) {
+      const n = t.name.toLowerCase()
+      if (n.includes('lint') || n.includes('eslint') || n.includes('stylelint')) checkMap.lint.push(t.name)
+      if (n.includes('typecheck') || n.includes('tsc') || n.includes('pyright') || n.includes('mypy')) checkMap.typecheck.push(t.name)
+      if (n.includes('audit') || n.includes('depcheck') || n.includes('security') || n.includes('outdated')) checkMap.audit.push(t.name)
+      if (n.includes('test') || n.includes('vitest') || n.includes('jest') || n.includes('pytest')) checkMap.test.push(t.name)
+      if (n.includes('format') || n.includes('prettier') || n.includes('biome') || n.includes('check_format')) checkMap.format.push(t.name)
+    }
+
+    const results: string[] = []
+    let passCount = 0
+    let failCount = 0
+    const failures: string[] = []
+
+    for (const checkType of checks) {
+      const toolNames = checkMap[checkType]
+      if (!toolNames || toolNames.length === 0) {
+        results.push(`⚪ ${checkType}: 未安装对应插件，跳过`)
+        continue
+      }
+
+      for (const toolName of toolNames) {
+        try {
+          const result = await executeTool(toolName, { project_path: match }, ctx)
+          const passed = result.success && !/error|错误|失败|✗|❌|vulnerability|漏洞/i.test(result.output)
+          if (passed) {
+            results.push(`✅ ${checkType} (${toolName}): 通过`)
+            passCount++
+          } else {
+            const preview = result.output.slice(0, 300)
+            results.push(`❌ ${checkType} (${toolName}): 未通过`)
+            results.push(`   ${preview}`)
+            failCount++
+            failures.push(`${checkType}: ${preview.slice(0, 150)}`)
+          }
+        } catch (err) {
+          results.push(`⚠️ ${checkType} (${toolName}): 执行异常 - ${String(err).slice(0, 100)}`)
+          failCount++
+        }
+      }
+    }
+
+    const total = passCount + failCount
+    const header = `📋 验收报告 — ${name}\n${'─'.repeat(40)}`
+    const summary = `\n总计: ${total} 项检查 | ✅ ${passCount} 通过 | ❌ ${failCount} 失败`
+
+    let action = ''
+    if (failCount > 0) {
+      action = `\n\n⚠️ 有 ${failCount} 项未通过！建议打回项目 AI 修复：\ntask_project(project_path="${match}", task="请修复以下验收问题: ${failures.join('; ')}")`
+    } else if (total > 0) {
+      action = '\n\n🎉 全部验收通过！可以汇报用户。'
+    }
+
+    return { success: true, output: [header, ...results, summary, action].join('\n') }
   },
 }
 
-const writeFileTool: AgentTool = {
-  name: 'write_file',
-  description: '写入文件内容到项目中。',
+const generateLaunchScriptsTool: AgentTool = {
+  name: 'generate_launch_scripts',
+  description: '为全部或指定项目生成一键启动 .bat 脚本。自动检测项目类型（npm/maven/python/docker等）确定启动命令。生成后用户可在项目卡片上点击启动按钮。',
   parameters: {
     type: 'object',
     properties: {
-      file_path: { type: 'string', description: '要写入的文件绝对路径' },
-      content: { type: 'string', description: '要写入的内容' },
+      project_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '要生成启动脚本的项目路径列表。为空则处理全部项目。',
+      },
     },
-    required: ['file_path', 'content'],
   },
-  group: 'write',
+  group: 'control',
   isReadOnly: false,
-  isConcurrencySafe: false,
-  isDestructive: true,
-  core: false,
-  async execute(params): Promise<ToolResult> {
-    const filePath = params.file_path as string
-    const content = params.content as string
-    try {
-      const dir = path.dirname(filePath)
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-      fs.writeFileSync(filePath, content, 'utf-8')
-      return { success: true, output: `文件已写入: ${filePath} (${content.length} 字符)` }
-    } catch (err) {
-      return { success: false, output: `写入失败: ${String(err)}` }
-    }
-  },
-}
+  isConcurrencySafe: true,
+  isDestructive: false,
+  async execute(params, ctx): Promise<ToolResult> {
+    const requested = params.project_paths as string[] | undefined
+    const paths = (requested && requested.length > 0) ? requested : ctx.projectIds
+    const results: string[] = []
 
-const shellExecTool: AgentTool = {
-  name: 'shell_exec',
-  description: '在指定项目目录中执行 shell 命令。',
-  parameters: {
-    type: 'object',
-    properties: {
-      project_path: { type: 'string', description: '项目路径（作为工作目录）' },
-      command: { type: 'string', description: '要执行的命令' },
-    },
-    required: ['command'],
-  },
-  group: 'execute',
-  isReadOnly: false,
-  isConcurrencySafe: false,
-  core: false,
-  isDestructive: (params) => {
-    const cmd = (params.command as string || '').toLowerCase()
-    return !(cmd.startsWith('echo ') || cmd.startsWith('ls ') || cmd.startsWith('dir ') || cmd.startsWith('cat ') || cmd.startsWith('type '))
-  },
-  checkPermissions(params) {
-    const cmd = (params.command as string || '')
-    if (/\brm\s+-rf\b|\brmdir\b|\bdel\s+\/[fs]\b|\bformat\b/i.test(cmd)) {
-      return { decision: 'deny', reason: '危险命令已拦截: ' + cmd }
+    for (const id of paths) {
+      const name = ctx.projectNames.get(id) || id.split('\\').pop() || id
+      try {
+        // 检测项目类型并生成 bat
+        const pkgJsonPath = path.join(id, 'package.json')
+        const cmakePath = path.join(id, 'CMakeLists.txt')
+        const goModPath = path.join(id, 'go.mod')
+        const cargoPath = path.join(id, 'Cargo.toml')
+        const reqPath = path.join(id, 'requirements.txt')
+        const dockerPath = path.join(id, 'docker-compose.yml')
+        const makefilePath = path.join(id, 'Makefile')
+        const pomPath = path.join(id, 'pom.xml')
+        const gradlePath = path.join(id, 'build.gradle')
+
+        let launchCmd = ''
+        if (fs.existsSync(pkgJsonPath)) {
+          try {
+            const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
+            const scripts = pkg.scripts || {}
+            if (scripts.dev) launchCmd = 'npm run dev'
+            else if (scripts.start) launchCmd = 'npm start'
+            else if (scripts.serve) launchCmd = 'npm run serve'
+            else if (scripts.build) launchCmd = 'npm run build'
+            else launchCmd = 'npm run dev'
+          } catch { launchCmd = 'npm run dev' }
+        } else if (fs.existsSync(pomPath)) {
+          launchCmd = 'mvn spring-boot:run'
+        } else if (fs.existsSync(gradlePath)) {
+          launchCmd = 'gradle bootRun'
+        } else if (fs.existsSync(goModPath)) {
+          launchCmd = 'go run .'
+        } else if (fs.existsSync(cargoPath)) {
+          launchCmd = 'cargo run'
+        } else if (fs.existsSync(reqPath)) {
+          launchCmd = 'python -m uvicorn main:app --reload'
+        } else if (fs.existsSync(dockerPath)) {
+          launchCmd = 'docker-compose up'
+        } else if (fs.existsSync(makefilePath)) {
+          launchCmd = 'make run'
+        } else if (fs.existsSync(cmakePath)) {
+          launchCmd = 'cmake --build build && build\\Debug\\' + name + '.exe'
+        } else {
+          launchCmd = 'echo 未检测到已知项目类型，请手动编辑此文件'
+        }
+
+        const batContent = `@echo off
+chcp 65001 >nul
+cd /d "${id}"
+echo ========================================
+echo  启动项目: ${name}
+echo  命令: ${launchCmd}
+echo ========================================
+echo.
+${launchCmd}
+echo.
+echo ========================================
+echo  项目已退出
+echo ========================================
+pause
+`
+        const batPath = path.join(id, '.dbvs-launch.bat')
+        fs.writeFileSync(batPath, batContent, 'utf-8')
+        results.push(`✅ ${name}: 启动脚本已生成 → ${launchCmd}`)
+      } catch (err) {
+        results.push(`❌ ${name}: ${String(err)}`)
+      }
     }
-    return null
-  },
-  async execute(params): Promise<ToolResult> {
-    const cmd = params.command as string
-    const cwd = (params.project_path as string) || process.cwd()
-    try {
-      const stdout = execSync(cmd, { cwd, timeout: 30000, encoding: 'utf-8', maxBuffer: 1024 * 1024 })
-      return { success: true, output: stdout.slice(0, 5000) }
-    } catch (err: any) {
-      return { success: false, output: err.stderr || err.message || String(err) }
-    }
+
+    results.unshift(`已为 ${results.filter(r => r.startsWith('✅')).length}/${paths.length} 个项目生成启动脚本`)
+    return { success: true, output: results.join('\n') }
   },
 }
 
@@ -745,14 +943,16 @@ export function registerAllTools(): void {
   registerTool(checkStatusTool)
   registerTool(broadcastTool)
   registerTool(taskProjectTool)
-  // P1 — 情报收集
+  // P1 — 情报收集（只读项目 AI 聊天记录，绝不直接读项目文件）
   registerTool(readProjectChatTool)
   registerTool(healthReportTool)
   // P1.5 — 任务队列
+  registerTool(pollProjectsTool)
   registerTool(queueStatusTool)
   registerTool(addFollowUpTool)
-  // P1 — 文件/Shell（仅紧急情况使用，系统提示词禁止日常使用）
-  registerTool(readFileTool)
-  registerTool(writeFileTool)
-  registerTool(shellExecTool)
+  // P2 — 验收 & 交付
+  registerTool(verifyProjectTool)
+  registerTool(generateLaunchScriptsTool)
+  // 注意：绝不注册 read_file / write_file / shell_exec
+  // 总控智能体只查看项目 AI 的状态（聊天记录/PTY），绝不直接碰项目文件
 }

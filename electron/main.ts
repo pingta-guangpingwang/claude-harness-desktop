@@ -21,6 +21,7 @@ import { registerPluginIpc } from './plugins/pluginIpc.js'
 import { registerWorkflowIpc } from './workflow/workflowIpc.js'
 import { registerSystemIpc, getAuditLogger, getRuleEngine, getPerfMonitor } from './modules/systemIpc.js'
 import { registerHubIpc } from './modules/hubIpc.js'
+import { registerProjectLauncherIpc } from './modules/projectLauncher.js'
 
 // Phase 1 — 中枢层
 import { trayManager } from './tray.js'
@@ -63,6 +64,7 @@ function registerAllHandlers() {
   registerWorkflowIpc(mainWindow!)
   registerSystemIpc()
   registerHubIpc()
+  registerProjectLauncherIpc()
 
   // Agent-CLI 桥接
   const cliRegistry = getCliRegistry()

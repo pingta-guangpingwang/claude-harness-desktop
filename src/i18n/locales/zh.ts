@@ -158,6 +158,21 @@ const zh: Translations = {
     headerEco: 'Eco',
     headerSystem: 'System',
     headerQuickCommand: '快捷命令',
+    launchBatTitle: '一键启动',
+    launchBatNoScript: '未生成启动脚本。请在 Chat 中让驾驭智能体生成: "生成全部启动脚本"',
+    launchBatGenerated: '启动项目',
+    quickTaskTitle: '向项目 AI 派发任务',
+    quickTaskPlaceholder: '输入自然语言任务，例如: 检查代码规范、修复lint错误、重构路由模块...',
+    quickTaskSending: '发送中...',
+    quickTaskSent: '已向项目 AI 派发任务: {task}',
+    quickTaskTerminalFailed: '启动项目终端失败: {err}',
+    quickTaskSendFailed: '派发失败: {err}',
+    quickTaskHint: 'Enter 发送到项目 Claude Code | Shift+Enter 换行 | 自动打开 Chat 面板',
+    statusIndicatorIdle: '未启动',
+    statusIndicatorConnecting: 'Claude Code 启动中...',
+    statusIndicatorWorking: 'AI 工作中...',
+    statusIndicatorReady: 'Claude Code 就绪',
+    statusIndicatorDisconnected: 'Claude Code 已断开',
   },
 
   harnessAgent: {
@@ -249,6 +264,10 @@ const zh: Translations = {
     memoryCleanupThreshold: '内存清理阈值',
     thinkingStart: 'AI 思考中...',
     statusReportLabel: '状态报告',
+    generateLaunchBats: '生成全部启动脚本',
+    generatingLaunchBats: '正在生成启动脚本...',
+    launchBatsGenerated: '{count}/{total} 个项目启动脚本已生成',
+    launchBatsFailed: '生成启动脚本失败',
   },
 
   sandbox: {

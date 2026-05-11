@@ -3,6 +3,11 @@ import * as path from 'path'
 import * as fs from 'fs-extra'
 import { db } from './database.js'
 
+function normPath(p: string): string {
+  return p.replace(/\//g, '\\').replace(/\\+$/, '').trim()
+    .replace(/^([a-z]):/i, (_, d) => d.toUpperCase() + ':')
+}
+
 const DESIGN_PATTERNS: Record<string, { label: string; type: string; status: string }> = {
   src: { label: '源代码 (src)', type: 'module', status: 'in_progress' },
   public: { label: '静态资源 (public)', type: 'module', status: 'pending' },
@@ -342,7 +347,9 @@ export function registerHorseFarmIpc() {
 
   ipcMain.handle('horsefarm:save-project-ids', async (_, ids: string[], individualProjects?: Record<string, any>) => {
     try {
-      await db.setProjectIds({ ids, individualProjects: individualProjects || {} })
+      // 归一化路径再存储，确保与 PTY 会话 key 一致
+      const normalizedIds = ids.map(id => normPath(id))
+      await db.setProjectIds({ ids: normalizedIds, individualProjects: individualProjects || {} })
       return { success: true }
     } catch { return { success: false } }
   })
@@ -350,7 +357,10 @@ export function registerHorseFarmIpc() {
   ipcMain.handle('horsefarm:load-project-ids', async () => {
     try {
       const data = await db.getProjectIds()
-      return { success: true, ids: Array.isArray(data.ids) ? data.ids : [], individualProjects: data.individualProjects || {} }
+      const rawIds = Array.isArray(data.ids) ? data.ids : []
+      // 归一化已存储的路径（兼容旧数据中未归一化的路径）
+      const normalizedIds = rawIds.map(id => normPath(id))
+      return { success: true, ids: normalizedIds, individualProjects: data.individualProjects || {} }
     } catch { return { success: true, ids: [], individualProjects: {} } }
   })
 }

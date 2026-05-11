@@ -100,6 +100,7 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
     { label: '项目体检 全部', text: '对所有项目进行全面体检，生成中文健康报告' },
     { label: '拉取最新代码 全部', text: '请在所有项目中执行 git pull 并汇报结果' },
     { label: '广播消息', text: '/broadcast ' },
+    { label: '生成全部启动脚本', text: '/generate_launch_scripts 为所有项目生成一键启动脚本' },
   ]
 
   const [customCommands, setCustomCommands] = useState<QuickCommand[]>(() => {
@@ -319,6 +320,30 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
     }
   }, [heartbeats, ha])
 
+  // 生成全部项目启动脚本（直接调用，不经过 AI）
+  const generateLaunchBatsAll = useCallback(async () => {
+    addStoreLog({ type: 'system', text: '🚀 ' + (ha as any).generatingLaunchBats || '正在生成启动脚本...' })
+    try {
+      const projects = projectIds.map(id => ({
+        path: id,
+        name: hfProjects[id]?.projectName || id.split('\\').pop() || id,
+      }))
+      const res = await window.electronAPI.generateAllLaunchBats(projects)
+      if (res.success) {
+        const successCount = res.results.filter(r => r.success).length
+        addStoreLog({ type: 'system', text: '✅ ' + ((ha as any).launchBatsGenerated || `生成完成`)
+          .replace('{count}', String(successCount)).replace('{total}', String(res.results.length)) })
+        for (const r of res.results) {
+          addStoreLog({ type: 'system', text: `  ${r.success ? '✅' : '❌'} ${r.name}${r.success ? ' → ' + r.command : ' — ' + (r.message || '失败')}` })
+        }
+      } else {
+        addStoreLog({ type: 'system', text: '❌ ' + ((ha as any).launchBatsFailed || '生成启动脚本失败') })
+      }
+    } catch (err) {
+      addStoreLog({ type: 'system', text: '❌ ' + ((ha as any).launchBatsFailed || '生成失败') + ': ' + String(err) })
+    }
+  }, [projectIds, hfProjects, ha])
+
   // ==== 驾驭智能体：使用 IPC Agent Loop ====
 
   const handleAgentCommand = useCallback(async () => {
@@ -343,6 +368,9 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
       } else if (lower.includes('状态') || lower.includes('心跳') || lower.includes('检查')) {
         addStoreLog({ type: 'system', text: '🔤 关键词匹配: 检查状态' })
         checkStatus()
+      } else if (lower.includes('启动脚本') || lower.includes('生成bat') || lower.includes('launch')) {
+        addStoreLog({ type: 'system', text: '🔤 关键词匹配: 生成全部启动脚本' })
+        generateLaunchBatsAll()
       } else {
         addStoreLog({ type: 'system', text: '🤖 无法识别意图。你可以尝试：唤醒全部终端 / 停止全部终端 / 检查状态 / 广播 shell 命令。' })
       }
@@ -380,7 +408,7 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
       setAiThinking(false)
       setAgentRunning(false)
     }
-  }, [agentInput, hfConfig, projectIds, hfProjects, heartbeats, permissions, wakeAllTerminals, stopAllTerminals, checkStatus])
+  }, [agentInput, hfConfig, projectIds, hfProjects, heartbeats, permissions, wakeAllTerminals, stopAllTerminals, checkStatus, generateLaunchBatsAll])
 
   // 权限确认
   const handlePermission = useCallback((decision: 'allow' | 'deny' | 'allow_once') => {
@@ -784,6 +812,16 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
               }}
             >
               📊 {ha.quickCheck}
+            </button>
+            <button
+              onClick={generateLaunchBatsAll}
+              style={{
+                padding: '6px 14px', borderRadius: 6, border: '1px solid var(--app-border-primary)',
+                background: 'var(--app-bg-tertiary)', color: 'var(--app-text-primary)',
+                cursor: 'pointer', fontSize: 12,
+              }}
+            >
+              🚀 {(ha as any).generateLaunchBats || '生成全部启动脚本'}
             </button>
           </div>
 

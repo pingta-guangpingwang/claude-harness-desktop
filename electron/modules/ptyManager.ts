@@ -29,6 +29,7 @@ interface PtySession {
   pty: PtyProcess
   sessionId: string
   projectPath: string
+  lastDataAt: number
 }
 
 /** 多项目并行 PTY 会话表：key = 规范化后的项目路径 */
@@ -60,10 +61,11 @@ export async function spawnPtySession(projectPath: string, command?: string, arg
       cols: 120, rows: 40,
     })
     const sessionId = createSessionId()
-    const session: PtySession = { pty: newPty, sessionId, projectPath: key }
+    const session: PtySession = { pty: newPty, sessionId, projectPath: key, lastDataAt: Date.now() }
     sessions.set(key, session)
     console.log('[PTY] PID:', newPty.pid, '会话:', sessionId, '项目:', key)
     newPty.onData((data: string) => {
+      session.lastDataAt = Date.now()
       sendToRenderer('pty:data', key, data)
       feedCollector(key, data)
     })
@@ -269,12 +271,13 @@ export function killPtySession(projectPath?: string): { success: boolean; messag
 }
 
 /** 直接查询 PTY 状态（供 harnessAgent 工具调用，不走 IPC） */
-export function getPtyStatus(projectPath: string): { connected: boolean; sessionId: string | null; pid: number | null } {
+export function getPtyStatus(projectPath: string): { connected: boolean; sessionId: string | null; pid: number | null; lastDataAt: number } {
   const session = sessions.get(normPath(projectPath))
   return {
     connected: !!session,
     sessionId: session?.sessionId ?? null,
     pid: session?.pty.pid ?? null,
+    lastDataAt: session?.lastDataAt ?? 0,
   }
 }
 

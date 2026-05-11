@@ -7,6 +7,11 @@ import type { ProjectPtyStatus } from '../../context/ChatContext'
 import ProjectProgressCard from './ProjectProgressCard'
 import { VirtualList } from '../Shared/VirtualList'
 
+function normPath(p: string): string {
+  return p.replace(/\//g, '\\').replace(/\\+$/, '').trim()
+    .replace(/^([a-z]):/i, (_, d) => d.toUpperCase() + ':')
+}
+
 interface ProjectListProps {
   projectIds: string[]
   hfProjects: Record<string, HorseFarmProject>
@@ -96,7 +101,7 @@ export default function ProjectList({
         project={pj}
         isActive={activeProject === id}
         progress={getProgress(id)}
-        ptyStatus={projectStatuses[id]}
+        ptyStatus={projectStatuses[normPath(id)] ?? projectStatuses[id]}
         detailProjectPath={detailProjectPath}
         detailPanelType={detailPanelType}
         initProgress={initProgress[id]}

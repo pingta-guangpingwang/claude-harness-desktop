@@ -68,6 +68,10 @@ export default function ProjectProgressCard({
   const isComplete = progress >= 100
 
   // Notes
+  const [hasLaunchBat, setHasLaunchBat] = useState(false)
+  const [showQuickTask, setShowQuickTask] = useState(false)
+  const [quickTaskText, setQuickTaskText] = useState('')
+  const [quickTaskSending, setQuickTaskSending] = useState(false)
   const [notes, setNotes] = useState('')
   const [showNotesEditor, setShowNotesEditor] = useState(false)
   const [notesDraft, setNotesDraft] = useState('')
@@ -75,6 +79,12 @@ export default function ProjectProgressCard({
   useEffect(() => {
     window.electronAPI.loadProjectNotes(hfProject.projectPath).then(r => {
       if (r.success) setNotes(r.notes || '')
+    }).catch(() => {})
+  }, [hfProject.projectPath])
+
+  useEffect(() => {
+    window.electronAPI.checkLaunchBat(hfProject.projectPath).then(r => {
+      if (r.success) setHasLaunchBat(r.exists)
     }).catch(() => {})
   }, [hfProject.projectPath])
 
@@ -105,16 +115,16 @@ export default function ProjectProgressCard({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {/* PTY 状态指示灯: 灰=未启动 黄闪=连接中 绿闪=工作中 绿=就绪 红=断开 */}
               {(() => {
-                let color = '#9ca3af', label = '未启动', glow: string | undefined, pulse: string | undefined
+                let color = '#9ca3af', label = t.horseFarm.statusIndicatorIdle, glow: string | undefined, pulse: string | undefined
                 if (ptyStatus) {
                   if (ptyStatus.isConnecting) {
-                    color = '#f59e0b'; label = 'Claude Code 启动中...'; glow = '0 0 6px #f59e0b'; pulse = 'hf-pulse 1s ease-in-out infinite'
+                    color = '#f59e0b'; label = t.horseFarm.statusIndicatorConnecting; glow = '0 0 6px #f59e0b'; pulse = 'hf-pulse 1s ease-in-out infinite'
                   } else if (ptyStatus.isConnected && isProcessing) {
-                    color = '#10b981'; label = 'AI 工作中...'; glow = '0 0 8px #10b981'; pulse = 'hf-pulse 0.6s ease-in-out infinite'
+                    color = '#10b981'; label = t.horseFarm.statusIndicatorWorking; glow = '0 0 8px #10b981'; pulse = 'hf-pulse 0.6s ease-in-out infinite'
                   } else if (ptyStatus.isConnected) {
-                    color = '#10b981'; label = 'Claude Code 就绪'; glow = '0 0 4px #10b981'
+                    color = '#10b981'; label = t.horseFarm.statusIndicatorReady; glow = '0 0 4px #10b981'
                   } else {
-                    color = '#ef4444'; label = 'Claude Code 已断开'
+                    color = '#ef4444'; label = t.horseFarm.statusIndicatorDisconnected
                   }
                 }
                 return (
@@ -219,6 +229,39 @@ export default function ProjectProgressCard({
           >
             Chat
           </button>
+          {/* 一键启动按钮 */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              if (hasLaunchBat) {
+                window.electronAPI.launchProject(hfProject.projectPath).catch(() => {})
+              } else {
+                addSystemMessage(t.horseFarm.launchBatNoScript, 'status')
+              }
+            }}
+            title={hasLaunchBat ? t.horseFarm.launchBatGenerated : t.horseFarm.launchBatNoScript}
+            style={{
+              padding: '4px 8px', borderRadius: '4px', border: hasLaunchBat ? '1px solid #f59e0b' : '1px solid #d1d5db',
+              background: hasLaunchBat ? '#fef3c7' : '#f3f4f6',
+              color: hasLaunchBat ? '#92400e' : '#9ca3af',
+              cursor: 'pointer', fontSize: '12px', fontWeight: hasLaunchBat ? 600 : 400,
+              transition: 'all 0.15s',
+            }}
+          >🚀</button>
+          {/* 项目 AI 快速任务按钮 */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setQuickTaskText('')
+              setShowQuickTask(true)
+            }}
+            title="向项目 AI 快速派发任务"
+            style={{
+              padding: '4px 8px', borderRadius: '4px', border: '1px solid #8b5cf6',
+              background: '#f5f3ff', color: '#7c3aed',
+              cursor: 'pointer', fontSize: '12px', fontWeight: 600,
+            }}
+          >🤖</button>
           {hfProject.phase === 'idle' || hfProject.phase === 'requirements' ? (
             <button className="primary" onClick={(e) => { e.stopPropagation(); setShowWorkflow(true) }}>
               {t.horseFarm.workflowTitle}
@@ -276,6 +319,78 @@ export default function ProjectProgressCard({
           />
         )}
       </div>
+
+      {/* Quick Task Dialog — 项目 AI 交互 */}
+      {showQuickTask && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1002,
+          background: 'rgba(0,0,0,0.35)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }} onClick={() => setShowQuickTask(false)}>
+          <div style={{
+            background: '#fff', borderRadius: '12px', padding: '20px',
+            width: '480px', maxWidth: '94vw',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+            display: 'flex', flexDirection: 'column',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h4 style={{ margin: 0, fontSize: '14px', color: '#1f2937' }}>
+                🤖 {t.horseFarm.quickTaskTitle} — {hfProject.projectName}
+              </h4>
+              <button onClick={() => setShowQuickTask(false)} style={{
+                border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '18px', color: '#9ca3af',
+              }}>✕</button>
+            </div>
+            <textarea
+              value={quickTaskText}
+              onChange={e => setQuickTaskText(e.target.value)}
+              placeholder={t.horseFarm.quickTaskPlaceholder}
+              autoFocus
+              style={{
+                flex: 1, minHeight: '100px', padding: '12px',
+                border: '1px solid #d1d5db', borderRadius: '8px',
+                fontSize: '13px', lineHeight: 1.6, resize: 'vertical',
+                outline: 'none', fontFamily: 'inherit',
+              }}
+              onKeyDown={async e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  const task = quickTaskText.trim()
+                  if (!task || quickTaskSending) return
+                  setQuickTaskSending(true)
+                  try {
+                    // 确保 PTY 在线
+                    const status = await window.electronAPI.ptyGetStatus(hfProject.projectPath)
+                    if (!status.connected) {
+                      const spawnRes = await window.electronAPI.ptySpawn(hfProject.projectPath)
+                      if (!spawnRes.success) {
+                        addSystemMessage(t.horseFarm.quickTaskTerminalFailed.replace('{err}', spawnRes.message || ''), 'error')
+                        setQuickTaskSending(false)
+                        return
+                      }
+                      // 等待 Claude Code 初始化
+                      await new Promise(r => setTimeout(r, 5000))
+                    }
+                    // 发送任务到项目 PTY
+                    await window.electronAPI.ptyWrite(hfProject.projectPath, task + '\r')
+                    addSystemMessage(t.horseFarm.quickTaskSent.replace('{task}', task.slice(0, 100)), 'command')
+                    setShowQuickTask(false)
+                    // 自动打开 Chat 面板查看回复
+                    onLaunchChat()
+                  } catch (err) {
+                    addSystemMessage(t.horseFarm.quickTaskSendFailed.replace('{err}', String(err)), 'error')
+                  } finally {
+                    setQuickTaskSending(false)
+                  }
+                }
+              }}
+            />
+            <p style={{ fontSize: '10px', color: '#9ca3af', margin: '6px 0 0' }}>
+              {t.horseFarm.quickTaskHint}
+            </p>
+          </div>
+        </div>
+      )}
 
       {showWorkflow && (
         <PreProjectWorkflow

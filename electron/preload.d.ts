@@ -263,6 +263,7 @@ export interface ElectronAPI {
         connected: boolean;
         sessionId: string | null;
         pid: number | null;
+        lastDataAt: number;
     }>;
     ptyOnData: (callback: (projectPath: string, data: string) => void) => () => void;
     ptyOnExit: (callback: (projectPath: string, code: number) => void) => () => void;

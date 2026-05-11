@@ -94,13 +94,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ============ Launcher (v3.0) ============
   openInVSCode: (projectPath: string) => ipcRenderer.invoke('launcher:open-vscode', projectPath),
 
+  // ============ Project Launcher (v3.6) — 一键启动 bat ============
+  checkLaunchBat: (projectPath: string) => ipcRenderer.invoke('project:check-launch-bat', projectPath),
+  generateLaunchBat: (projectPath: string, projectName?: string) => ipcRenderer.invoke('project:generate-launch-bat', projectPath, projectName),
+  generateAllLaunchBats: (projects: Array<{ path: string; name: string }>) => ipcRenderer.invoke('project:generate-all-launch-bats', projects),
+  launchProject: (projectPath: string) => ipcRenderer.invoke('project:launch', projectPath),
+
   // ============ PTY Terminal Proxy (v3.0 - 多项目并行) ============
   ptySpawn: (projectPath: string, command?: string, args?: string[]) =>
     ipcRenderer.invoke('pty:spawn', projectPath, command, args),
   ptyWrite: (projectPath: string, data: string) => ipcRenderer.invoke('pty:write', projectPath, data),
   ptyResize: (projectPath: string, cols: number, rows: number) => ipcRenderer.invoke('pty:resize', projectPath, cols, rows),
   ptyKill: (projectPath?: string) => ipcRenderer.invoke('pty:kill', projectPath),
-  ptyGetStatus: (projectPath: string) => ipcRenderer.invoke('pty:status', projectPath),
+  ptyGetStatus: (projectPath: string) => ipcRenderer.invoke('pty:status', projectPath) as Promise<{ connected: boolean; sessionId: string | null; pid: number | null; lastDataAt: number }>,
   ptyOnData: (callback: (projectPath: string, data: string) => void) => {
     const handler = (_event: any, projectPath: string, data: string) => callback(projectPath, data)
     ipcRenderer.on('pty:data', handler)
@@ -327,12 +333,17 @@ export interface ElectronAPI {
   hubOnHotkeySummon: (callback: () => void) => void
   // Launcher (v3.0)
   openInVSCode: (projectPath: string) => Promise<{ success: boolean; message?: string }>
+  // Project Launcher (v3.6) — 一键启动 bat
+  checkLaunchBat: (projectPath: string) => Promise<{ success: boolean; exists: boolean }>
+  generateLaunchBat: (projectPath: string, projectName?: string) => Promise<{ success: boolean; command: string; message?: string }>
+  generateAllLaunchBats: (projects: Array<{ path: string; name: string }>) => Promise<{ success: boolean; results: Array<{ path: string; name: string; success: boolean; command: string; message?: string }> }>
+  launchProject: (projectPath: string) => Promise<{ success: boolean; message?: string }>
   // PTY Terminal Proxy (v3.0 - 多项目并行)
   ptySpawn: (projectPath: string, command?: string, args?: string[]) => Promise<{ success: boolean; pid?: number; sessionId?: string; message?: string }>
   ptyWrite: (projectPath: string, data: string) => Promise<{ success: boolean }>
   ptyResize: (projectPath: string, cols: number, rows: number) => Promise<{ success: boolean }>
   ptyKill: (projectPath?: string) => Promise<{ success: boolean }>
-  ptyGetStatus: (projectPath: string) => Promise<{ connected: boolean; sessionId: string | null; pid: number | null }>
+  ptyGetStatus: (projectPath: string) => Promise<{ connected: boolean; sessionId: string | null; pid: number | null; lastDataAt: number }>
   ptyOnData: (callback: (projectPath: string, data: string) => void) => () => void
   ptyOnExit: (callback: (projectPath: string, code: number) => void) => () => void
   ptyOnSpawned: (callback: (projectPath: string, sessionId: string, pid: number) => void) => () => void

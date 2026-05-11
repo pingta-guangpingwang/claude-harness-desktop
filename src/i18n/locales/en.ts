@@ -156,6 +156,21 @@ const en = {
     headerEco: 'Eco',
     headerSystem: 'System',
     headerQuickCommand: 'Quick Command',
+    launchBatTitle: 'Launch',
+    launchBatNoScript: 'No launch script yet. Ask harness agent to: "generate all launch scripts"',
+    launchBatGenerated: 'Launch Project',
+    quickTaskTitle: 'Send Task to Project AI',
+    quickTaskPlaceholder: 'Describe your task in natural language, e.g.: Check code standards, fix lint errors, refactor router...',
+    quickTaskSending: 'Sending...',
+    quickTaskSent: 'Task dispatched to project AI: {task}',
+    quickTaskTerminalFailed: 'Failed to start project terminal: {err}',
+    quickTaskSendFailed: 'Dispatch failed: {err}',
+    quickTaskHint: 'Enter to send to project Claude Code | Shift+Enter for newline | Auto-open Chat panel',
+    statusIndicatorIdle: 'Not started',
+    statusIndicatorConnecting: 'Claude Code starting...',
+    statusIndicatorWorking: 'AI working...',
+    statusIndicatorReady: 'Claude Code ready',
+    statusIndicatorDisconnected: 'Claude Code disconnected',
   },
 
   harnessAgent: {
@@ -247,6 +262,10 @@ const en = {
     memoryCleanupThreshold: 'Memory cleanup threshold',
     thinkingStart: 'AI thinking...',
     statusReportLabel: 'Status Report',
+    generateLaunchBats: 'Generate All Launch Scripts',
+    generatingLaunchBats: 'Generating launch scripts...',
+    launchBatsGenerated: 'Launch scripts generated for {count}/{total} projects',
+    launchBatsFailed: 'Failed to generate launch scripts',
   },
 
   sandbox: {
