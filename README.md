@@ -60,7 +60,7 @@ npm run dev-electron
 ### 🎛️ 驾驭智能体 · Harness Agent
 一个管理你所有项目 AI 的元 AI。它委派任务、监控进度、编排多项目工作流 — 你不再需要在终端间切换。
 
-**13 个内置工具：** `wake_projects`, `stop_projects`, `check_status`, `broadcast`, `task_project`, `read_project_chat`, `health_report`, `queue_status`, `add_follow_up`, `read_file`, `write_file`, `shell_exec`
+**14 个内置工具：** `create_project`, `wake_projects`, `stop_projects`, `check_status`, `broadcast`, `task_project`, `read_project_chat`, `health_report`, `queue_status`, `add_follow_up`, `read_file`, `write_file`, `shell_exec`
 
 插件工具在安装时自动注册 — 智能体会自动发现并使用它们。
 
@@ -224,10 +224,11 @@ claude-harness-desktop/
 ## 最近更新 · Recent Updates (2026年4-5月)
 
 ### 🎛️ 驾驭智能体 · Harness Agent
-- CEO 架构重构 — 13 内置工具 + 动态插件工具发现
-- 验收系统 — 任务完成自动检查，质量保障
-- 一键启动 bat 生成 — 每个项目生成独立启动脚本
-- 项目 AI 快送 — 快速将任务派发给指定项目 AI
+- **`create_project` 新项目工具** — 一句话创建新项目：建目录→注册→唤醒 Claude Code→派发开发任务，全自动
+- **基础设施工具** — `shell_exec` / `read_file` / `write_file` 专用于系统维护（安装工具、检查环境、读写配置），绝不碰项目源码
+- **非阻塞对话** — AI 运行期间用户可随时发送消息，中断当前思考并插入新指令
+- **智能容错** — 空项目预初始化跳过安全确认，死终端自动检测避免反复派发
+- CEO 架构重构 — 14 内置工具 + 动态插件工具发现
 
 ### 📊 Token 消耗追踪
 - JSONL 持久化记录每次 API 调用的 token 消耗
