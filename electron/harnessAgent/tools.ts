@@ -1138,6 +1138,109 @@ const installPluginTool: AgentTool = {
   },
 }
 
+// ============== P-INFRA CEO基础设施工具 — 修环境、查文件、写配置 ==============
+
+const shellExecTool: AgentTool = {
+  name: 'shell_exec',
+  description: 'CEO基础设施命令。用于安装CLI工具、设置环境变量、检查系统状态。禁止用于项目开发（那是项目AI的活）。返回stdout/stderr。',
+  parameters: {
+    type: 'object',
+    properties: {
+      command: { type: 'string', description: '要执行的shell命令。仅限：npm install -g、setx、dir、where、type、echo、node -v、npm -v' },
+      cwd: { type: 'string', description: '工作目录（可选）' },
+    },
+    required: ['command'],
+  },
+  group: 'infra',
+  isReadOnly: false,
+  isConcurrencySafe: true,
+  isDestructive: false,
+  async execute(params: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
+    const command = params.command as string
+    const cwd = (params.cwd as string) || process.cwd()
+    try {
+      const { execSync } = await import('child_process')
+      const output = execSync(command, { cwd, timeout: 60000, encoding: 'utf-8', windowsHide: true })
+      return { success: true, output: output.trim() || '(执行成功，无输出)' }
+    } catch (e: any) {
+      const stderr = e.stderr || ''
+      const stdout = e.stdout || ''
+      return { success: false, output: `执行失败 (退出码: ${e.status || '?'})\n${stdout}\n${stderr}`.trim() }
+    }
+  },
+}
+
+const readFileTool: AgentTool = {
+  name: 'read_file',
+  description: 'CEO只读文件检查。用于验证项目路径是否存在、读取配置文件、查看错误日志。禁止用于阅读项目源码（那是项目AI的活）。',
+  parameters: {
+    type: 'object',
+    properties: {
+      file_path: { type: 'string', description: '要读取的文件完整路径' },
+      max_lines: { type: 'number', description: '最大读取行数，默认50' },
+    },
+    required: ['file_path'],
+  },
+  group: 'infra',
+  isReadOnly: true,
+  isConcurrencySafe: true,
+  isDestructive: false,
+  async execute(params: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
+    const filePath = params.file_path as string
+    const maxLines = (params.max_lines as number) || 50
+    try {
+      if (!fs.existsSync(filePath)) {
+        // 检测是否为目录
+        try {
+          const entries = fs.readdirSync(filePath)
+          return { success: true, output: `[目录] ${filePath}\n${entries.slice(0, maxLines).join('\n')}${entries.length > maxLines ? `\n... 还有 ${entries.length - maxLines} 项` : ''}` }
+        } catch {}
+        return { success: false, output: `路径不存在: ${filePath}` }
+      }
+      const stat = fs.statSync(filePath)
+      if (stat.isDirectory()) {
+        const entries = fs.readdirSync(filePath)
+        return { success: true, output: `[目录] ${filePath}\n${entries.slice(0, maxLines).join('\n')}${entries.length > maxLines ? `\n... 还有 ${entries.length - maxLines} 项` : ''}` }
+      }
+      const content = fs.readFileSync(filePath, 'utf-8')
+      const lines = content.split('\n')
+      const truncated = lines.slice(0, maxLines).join('\n')
+      return { success: true, output: truncated + (lines.length > maxLines ? `\n... (共 ${lines.length} 行，仅显示前 ${maxLines})` : '') }
+    } catch (e: any) {
+      return { success: false, output: `读取失败: ${e.message}` }
+    }
+  },
+}
+
+const writeFileTool: AgentTool = {
+  name: 'write_file',
+  description: 'CEO写配置文件。仅限写入.json/.txt/.bat/.ps1等配置或脚本文件。严禁写项目源码！用于修复Claude Code配置、环境变量脚本等。',
+  parameters: {
+    type: 'object',
+    properties: {
+      file_path: { type: 'string', description: '要写入的文件完整路径' },
+      content: { type: 'string', description: '要写入的内容' },
+    },
+    required: ['file_path', 'content'],
+  },
+  group: 'infra',
+  isReadOnly: false,
+  isConcurrencySafe: true,
+  isDestructive: true,
+  async execute(params: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
+    const filePath = params.file_path as string
+    const content = params.content as string
+    try {
+      const dir = path.dirname(filePath)
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(filePath, content, 'utf-8')
+      return { success: true, output: `已写入: ${filePath} (${content.length} 字符)` }
+    } catch (e: any) {
+      return { success: false, output: `写入失败: ${e.message}` }
+    }
+  },
+}
+
 // ============== 注册全部工具 ==============
 
 export function registerAllTools(): void {
@@ -1160,6 +1263,9 @@ export function registerAllTools(): void {
   // P3 — 插件生态
   registerTool(listAvailablePluginsTool)
   registerTool(installPluginTool)
-  // 注意：绝不注册 read_file / write_file / shell_exec
-  // 总控智能体只查看项目 AI 的状态（聊天记录/PTY），绝不直接碰项目文件
+  // P-INFRA — CEO基础设施工具（修环境、查配置、写脚本）
+  // CEO 是工厂维护者，不是项目开发者——用这些工具修基础设施，不碰项目源码
+  registerTool(shellExecTool)
+  registerTool(readFileTool)
+  registerTool(writeFileTool)
 }

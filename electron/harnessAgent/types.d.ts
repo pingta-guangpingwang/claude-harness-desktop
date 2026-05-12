@@ -18,7 +18,7 @@ export interface AgentTool {
     /** 中断行为: cancel=取消当前工具, block=等待完成 */
     interruptBehavior?: 'cancel' | 'block';
     /** 工具分组 */
-    group?: 'control' | 'read' | 'write' | 'execute';
+    group?: 'control' | 'read' | 'write' | 'execute' | 'infra';
     /** 是否为核心工具（默认 true）。非核心工具不自动发送到 API，通过 skill_discovery 按需发现 */
     core?: boolean;
 }

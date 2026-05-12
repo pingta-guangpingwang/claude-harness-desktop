@@ -334,6 +334,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       return
     }
 
+    // 查询主进程实际 PTY 状态（防止 ChatContext 状态滞后于 Harness Agent 启动的会话）
+    try {
+      const realStatus = await window.electronAPI.ptyGetStatus(key)
+      if (realStatus.connected) {
+        console.log('[Chat] PTY 实际已运行 (由驾驭智能体启动)，同步状态:', key.slice(-30), 'pid:', realStatus.pid)
+        updateSession(key, prev => ({
+          ...prev,
+          isConnected: true,
+          isConnecting: false,
+          lastDataAt: realStatus.lastDataAt,
+        }))
+        return
+      }
+    } catch { /* ptyGetStatus 不可用时走正常启动流程 */ }
+
     // 正在连接中 → 等待
     if (existing.isConnecting) {
       console.log('[Chat] 项目正在连接中:', key.slice(-30))
