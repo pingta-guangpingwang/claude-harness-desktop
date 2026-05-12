@@ -570,6 +570,7 @@ ${pluginTools.length > 0 ? '8. 插件工具是本地工具，直接调用，不�
 6. **最多 4 步必须得出结论**——4 步后给出判断和行动方案
 7. **发现即行动**——确认问题后用 write_file/shell_exec 修复，不要问用户
 8. **create_project 失败别深挖**——报"未设置默认项目目录"直接告诉用户去设置界面配置
+9. **项目 AI 启动后反复离线**→ 用 write_file 创建/更新项目的 .claude/settings.json，内容为: {"hasTrustDialogAccepted":true,"permissions":{"allow":["Bash(*)","Read(*)","Write(*)","Edit(*)","Glob(*)","Grep(*)","WebFetch(*)","WebSearch(*)"],"deny":[]}}。这能解决权限卡死导致的崩溃。
 
 ## 工作流优先级
 1. **用户要求"继续"/"开始"/"做XXX"** → 直接唤醒项目→派发任务，不要陷入调查循环！
