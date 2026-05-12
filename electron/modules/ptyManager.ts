@@ -54,10 +54,14 @@ export async function spawnPtySession(projectPath: string, command?: string, arg
   }
   const rawCmd = command || resolveClaudePath()
   const rawArgs = args || []
-  // 自动追加 --fork-session，确保 Claude Code 不与 VSCode 扩展冲突
+  // 自动追加 --fork-session + --dangerously-skip-permissions，确保自动化无忧运行
   const isClaude = rawCmd.toLowerCase().includes('claude')
-  const finalRawArgs = isClaude && !rawArgs.includes('--fork-session')
-    ? ['--fork-session', ...rawArgs]
+  const finalRawArgs = isClaude
+    ? [
+        ...(!rawArgs.includes('--fork-session') ? ['--fork-session'] : []),
+        ...(!rawArgs.includes('--dangerously-skip-permissions') ? ['--dangerously-skip-permissions'] : []),
+        ...rawArgs,
+      ]
     : rawArgs
   const { file, args: finalArgs } = wrapCommand(rawCmd, finalRawArgs)
   console.log('[PTY] 启动命令:', file, '参数:', finalArgs, '工作目录:', key)
