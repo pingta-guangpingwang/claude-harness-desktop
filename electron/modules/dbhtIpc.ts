@@ -91,15 +91,11 @@ export function registerDbhtIpc(mainWindow: BrowserWindow | null) {
       if (!fs.existsSync(p)) {
         return { success: false, message: `路径不存在: ${p}` }
       }
-      // Windows: 用 explorer.exe 打开（最可靠）；非 Windows 回退 shell.openPath
-      if (process.platform === 'win32') {
-        execSync(`explorer "${p}"`, { timeout: 5000 })
-        return { success: true }
-      }
       const err = await shell.openPath(p)
-      if (!err) return { success: true }
-      try { execSync(`open "${p}"`, { timeout: 5000 }); return { success: true } } catch { /* ignore */ }
-      return { success: false, message: err }
+      if (err) {
+        return { success: false, message: err }
+      }
+      return { success: true }
     } catch (e: any) {
       return { success: false, message: e?.message || String(e) }
     }
