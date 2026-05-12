@@ -1295,6 +1295,17 @@ const createProjectTool: AgentTool = {
       fs.mkdirSync(projectPath, { recursive: true })
       console.log('[CEO] 创建新项目目录:', projectPath)
 
+      // 2.5 预初始化 Claude Code 项目标记，跳过"是否信任此目录"的安全确认
+      const claudeDir = path.join(projectPath, '.claude')
+      if (!fs.existsSync(claudeDir)) {
+        fs.mkdirSync(claudeDir)
+      }
+      const claudeMdPath = path.join(projectPath, 'CLAUDE.md')
+      if (!fs.existsSync(claudeMdPath)) {
+        fs.writeFileSync(claudeMdPath, `# ${projectName}\n\n> Created by Harness Farm\n`, 'utf-8')
+      }
+      console.log('[CEO] 已预初始化 Claude Code 项目标记:', projectPath)
+
       // 3. 注册到项目列表
       const projectIds = await db.getProjectIds()
       const ids: string[] = projectIds.ids || []
@@ -1327,13 +1338,6 @@ const createProjectTool: AgentTool = {
       if (!spawnResult.success) {
         return { success: false, output: `项目目录已创建并注册，但 Claude Code 启动失败: ${spawnResult.message}` }
       }
-
-      // 4.5 新空目录首次打开，Claude Code 会弹出安全确认
-      // "Is this a project you created or one you trust?" → 自动按 Enter 选 YES
-      setTimeout(() => {
-        writeToPty(projectPath, '\r')
-        console.log('[CEO] 自动应答新目录安全确认: Enter →', projectPath.slice(-40))
-      }, 4000)
 
       const descLine = description ? `\n📝 需求: ${description}` : ''
       return {
