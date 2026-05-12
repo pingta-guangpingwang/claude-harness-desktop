@@ -588,9 +588,11 @@ ${pluginTools.length > 0 ? '9. 格式化/检查/审计/依赖/服务 → 查上�
 ## 验收工作流（重要！）
 项目 AI 报告任务完成后，必须验收：
 1. 调 verify_project(project_path="...", checks=["lint","typecheck","audit"])
-2. 全部通过 → 汇报用户 "✅ 任务完成并通过验收"
-3. 有失败 → task_project 把失败详情发给项目 AI 修复 → poll_projects 等待 → 再次 verify_project
-4. 最多 3 轮验收，超过则标记 "需人工介入" 并汇报当前状态
+2. 调用 generate_launch_scripts(project_paths=[项目路径]) 生成/更新官方启动脚本
+3. 如果项目有自定义 .bat，用 read_file 检查是否符合规范（chcp 65001 + cd /d "%~dp0" + UTF-8 + 无硬编码路径），不符合就让项目 AI 修复
+4. 全部通过 → 汇报用户 "✅ 任务完成并通过验收，启动脚本已就绪"
+5. 有失败 → task_project 把失败详情发给项目 AI 修复 → poll_projects 等待 → 再次 verify_project
+6. 最多 3 轮验收，超过则标记 "需人工介入" 并汇报当前状态
 
 ## 新建项目工作流（create_project — 从零开始开发新项目）
 用户要求"创建新项目"/"新建项目"/"做一个XXX项目"时：
@@ -612,6 +614,16 @@ ${pluginTools.length > 0 ? '9. 格式化/检查/审计/依赖/服务 → 查上�
 - "让 fox_ai 重构路由" → task_project(...) → poll_projects → verify_project → 汇报
 - "给所有项目派发..." → broadcast(task="...") → poll_projects → 汇总
 - "生成启动脚本" → generate_launch_scripts() → 汇报生成结果
+
+## .bat 启动脚本规范（项目AI 创建 bat 时必须遵循）
+项目 AI 在开发中如果创建 .bat 启动脚本，必须遵守以下规范，否则 Windows 上无法运行：
+1. 第一行必须是 chcp 65001 >nul 2>&1 — 切换为 UTF-8 编码，防止中文乱码导致命令被截断
+2. 第二行必须是 cd /d "%~dp0" — 切换到 bat 文件所在目录，不硬编码盘符路径
+3. 禁止硬编码绝对路径 — 不要写 D:\\xxx、C:\\xxx，用 %~dp0 相对路径
+4. bat 文件保存为 UTF-8 编码 — 不要用 GBK/ANSI 保存
+5. 完整命令 — 不要使用缩写，确保 npm/node/python 等命令完整拼写
+当你派发任务给项目 AI 开发工具类项目时，在 task 描述中附带上述规范。
+项目完成后，务必调用 generate_launch_scripts() 为该项目的官方启动脚本，它内建了路径检查和工具预检。
 ${pluginTools.length > 0 ? '- "检查代码规范" → 查插件规则 → 调对应工具' : ''}
 
 ## 回复铁律

@@ -35,18 +35,46 @@ function detectLaunchCommand(projectPath: string, projectName: string): string {
 function generateBat(projectPath: string, projectName: string): { success: boolean; command: string; message?: string } {
   try {
     const launchCmd = detectLaunchCommand(projectPath, projectName)
+
+    // 工具预检
+    const toolChecks: string[] = []
+    if (launchCmd.includes('npm') || launchCmd.includes('node ')) {
+      toolChecks.push('where node >nul 2>&1 || (echo [X] Node.js not found - https://nodejs.org && pause && exit /b 1)')
+    }
+    if (launchCmd.includes('mvn')) {
+      toolChecks.push('where mvn >nul 2>&1 || (echo [X] Maven not found && pause && exit /b 1)')
+    }
+    if (launchCmd.includes('python') || launchCmd.includes('uvicorn')) {
+      toolChecks.push('where python >nul 2>&1 || (echo [X] Python not found && pause && exit /b 1)')
+    }
+    if (launchCmd.includes('go ')) {
+      toolChecks.push('where go >nul 2>&1 || (echo [X] Go not found && pause && exit /b 1)')
+    }
+    if (launchCmd.includes('docker')) {
+      toolChecks.push('where docker >nul 2>&1 || (echo [X] Docker not found && pause && exit /b 1)')
+    }
+    const toolCheckBlock = toolChecks.length > 0
+      ? '\n' + toolChecks.join('\n') + '\n'
+      : ''
+
     const batContent = `@echo off
-chcp 65001 >nul
-cd /d "${projectPath}"
+chcp 65001 >nul 2>&1
+cd /d "%~dp0"${toolCheckBlock}
 echo ========================================
-echo  启动项目: ${projectName}
-echo  命令: ${launchCmd}
+echo   ${projectName}
+echo   ${launchCmd}
 echo ========================================
 echo.
 ${launchCmd}
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo [X] Exit code: %ERRORLEVEL%
+    pause
+    exit /b %ERRORLEVEL%
+)
 echo.
 echo ========================================
-echo  项目已退出
+echo   Done
 echo ========================================
 pause
 `
