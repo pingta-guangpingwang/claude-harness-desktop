@@ -281,8 +281,19 @@ const taskProjectTool: AgentTool = {
         await new Promise(r => setTimeout(r, 6000))
       }
 
-      // 发送任务并等待项目 AI 回复（最长 90s）
+      // 发送任务并等待项目 AI 回复（最长 120s）
       const result = await sendAndCollect(match, task, 120000)
+
+      // 空回复检测：PTY 可能已死或卡在安全确认
+      if (!result.output || result.output === '(无回复内容)' || result.output === '(超时 — 无回复)' || result.output === '(被新任务中断)') {
+        const aliveCheck = getPtyStatus(match)
+        if (!aliveCheck.connected) {
+          return { success: false, output: `❌ ${name}: 终端已断开 (PID 已退出)。请重新 wake_projects 唤醒后再派发任务。` }
+        }
+        // PTY 在线但无回复 → 可能卡在安全确认或启动流程
+        const idleSec = Math.round((Date.now() - aliveCheck.lastDataAt) / 1000)
+        return { success: false, output: `⚠️ ${name}: 终端在线但无回复 (空闲 ${idleSec}s)。可能卡在安全确认或初始化中，请先 read_project_chat 查看终端状态再决定下一步。` }
+      }
 
       if (result.success && result.output) {
         // B3: 反馈解析 — 检测成功/失败/需人工介入
@@ -1316,6 +1327,13 @@ const createProjectTool: AgentTool = {
       if (!spawnResult.success) {
         return { success: false, output: `项目目录已创建并注册，但 Claude Code 启动失败: ${spawnResult.message}` }
       }
+
+      // 4.5 新空目录首次打开，Claude Code 会弹出安全确认
+      // "Is this a project you created or one you trust?" → 自动按 Enter 选 YES
+      setTimeout(() => {
+        writeToPty(projectPath, '\r')
+        console.log('[CEO] 自动应答新目录安全确认: Enter →', projectPath.slice(-40))
+      }, 4000)
 
       const descLine = description ? `\n📝 需求: ${description}` : ''
       return {

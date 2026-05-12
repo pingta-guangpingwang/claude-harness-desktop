@@ -699,14 +699,13 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
                 value={agentInput}
                 onChange={e => handleAgentInputChange(e.target.value)}
                 onKeyDown={handleAgentKeyDown}
-                disabled={agentRunning}
                 placeholder={aiThinking ? ha.aiThinking : ha.inputSlashHint}
                 style={{
                   width: '100%', padding: '7px 12px', borderRadius: 8,
                   border: '1px solid var(--app-border-input)',
                   background: 'var(--app-bg-input)', color: 'var(--app-text-primary)',
                   fontSize: embedded ? 11 : 12, outline: 'none',
-                  opacity: agentRunning ? 0.6 : 1,
+                  opacity: 1,
                   boxSizing: 'border-box',
                 }}
               />
@@ -752,16 +751,16 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
             </div>
             <button
               onClick={handleAgentCommand}
-              disabled={!agentInput.trim() || agentRunning}
+              disabled={!agentInput.trim()}
               style={{
                 padding: '7px 16px', borderRadius: 8, border: 'none',
-                background: agentInput.trim() && !agentRunning
+                background: agentInput.trim()
                   ? 'linear-gradient(135deg, #6366f1, #8b5cf6)'
                   : 'var(--app-bg-tertiary)',
-                color: agentInput.trim() && !agentRunning ? '#fff' : 'var(--app-text-secondary)',
-                cursor: agentInput.trim() && !agentRunning ? 'pointer' : 'not-allowed',
+                color: agentInput.trim() ? '#fff' : 'var(--app-text-secondary)',
+                cursor: agentInput.trim() ? 'pointer' : 'not-allowed',
                 fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
-                opacity: agentInput.trim() && !agentRunning ? 1 : 0.5,
+                opacity: agentInput.trim() ? 1 : 0.5,
                 transition: 'all 0.2s',
               }}
             >
