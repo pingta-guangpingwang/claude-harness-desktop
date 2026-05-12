@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build:electron": "tsc --project tsconfig.node.json",
-    "dev-electron": "concurrently \"vite\" \"wait-on http://localhost:29347 && tsc --project tsconfig.node.json && cross-env NODE_ENV=development VITE_DEV_PORT=29347 electron .\"",
+    "dev-electron": "concurrently \"vite\" \"wait-on file:.vite/port && tsc --project tsconfig.node.json && cross-env NODE_ENV=development electron .\"",
     "build": "tsc --project tsconfig.node.json && vite build",
     "electron": "electron .",
     "start": "npm run build && electron .",

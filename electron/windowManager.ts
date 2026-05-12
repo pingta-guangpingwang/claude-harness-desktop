@@ -1,6 +1,18 @@
 // WindowManager — 多窗口生命周期管理（主窗口 + 悬浮小窗）
 import { BrowserWindow, screen } from 'electron'
 import { join } from 'path'
+import * as fs from 'fs'
+
+function getDevPort(): string {
+  if (process.env.VITE_DEV_PORT) return process.env.VITE_DEV_PORT
+  try {
+    const portFile = join(__dirname, '..', '.vite', 'port')
+    if (fs.existsSync(portFile)) {
+      return fs.readFileSync(portFile, 'utf-8').trim()
+    }
+  } catch { /* fall through to default */ }
+  return '29347'
+}
 
 interface FloatingWidgetConfig {
   position: { x: number; y: number }
@@ -38,7 +50,7 @@ export class WindowManager {
     })
 
     if (process.env.NODE_ENV === 'development') {
-      const port = process.env.VITE_DEV_PORT || '29347'
+      const port = getDevPort()
       this.mainWindow.loadURL(`http://localhost:${port}`)
     } else {
       this.mainWindow.loadFile(join(__dirname, '../dist/index.html'))
@@ -100,7 +112,7 @@ export class WindowManager {
 
     // 加载悬浮小窗的独立页面
     if (process.env.NODE_ENV === 'development') {
-      const port = process.env.VITE_DEV_PORT || '29347'
+      const port = getDevPort()
       this.floatingWindow.loadURL(`http://localhost:${port}/#/floating`)
     } else {
       this.floatingWindow.loadFile(join(__dirname, '../dist/index.html'), { hash: '/floating' })

@@ -20,9 +20,9 @@ let permissionManager: PermissionManager
 let toolsRegistered = false
 
 // 跨轮次对话记忆（持久化到本地，保留上下文）
+const MAX_MEMORY_TURNS = 30
 const MEMORY_FILE = path.join(app.getPath('userData'), 'conversation-memory.json')
 const conversationMemory: ConversationTurn[] = loadConversationMemory()
-const MAX_MEMORY_TURNS = 30
 
 function loadConversationMemory(): ConversationTurn[] {
   try {

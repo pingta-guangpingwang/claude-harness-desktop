@@ -15,11 +15,12 @@ interface PtySession {
     sessionId: string;
     projectPath: string;
     lastDataAt: number;
+    isClaude: boolean;
 }
 /** 获取会话表（供 harnessAgent 工具直接调用） */
 export declare function getSessions(): Map<string, PtySession>;
 /** 直接 spawn PTY（供 harnessAgent 工具调用，不走 IPC）。
- *  始终走 cmd.exe /c，追加 --fork-session 避免与 VSCode 冲突，失败时自动重试。 */
+ *  自动注入 --permission-mode acceptEdits，失败时自动重试。 */
 export declare function spawnPtySession(projectPath: string, command?: string, args?: string[]): Promise<{
     success: boolean;
     pid?: number;
@@ -33,7 +34,7 @@ export declare function writeToPty(projectPath: string, data: string): {
 };
 /** 向 PTY 发送命令并收集响应（供 harnessAgent 工具使用）。
  *  等待项目 AI 空闲 8s 后返回，最长等待 timeoutMs。 */
-export declare function sendAndCollect(projectPath: string, task: string, timeoutMs?: number): Promise<{
+export declare function sendAndCollect(projectPath: string, task: string, timeoutMs?: number, projectName?: string): Promise<{
     success: boolean;
     output: string;
 }>;
@@ -51,5 +52,7 @@ export declare function getPtyStatus(projectPath: string): {
     pid: number | null;
     lastDataAt: number;
 };
+/** 获取最近 PTY 输出（供 harnessAgent read_project_chat 读取实时终端内容） */
+export declare function getRecentPtyOutput(projectPath: string, maxLines?: number): string;
 export declare function registerPtyIpc(window: BrowserWindow): void;
 export {};

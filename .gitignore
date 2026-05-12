@@ -24,9 +24,15 @@ commits/
 # Claude Code session
 .claude/
 
+# Vite dev port file
+.vite/
+
 # Compiled JS (TS source in electron/)
 electron/**/*.js
 electron/**/*.js.map
+
+# Runtime logs
+log.txt
 
 # User config
 config.json

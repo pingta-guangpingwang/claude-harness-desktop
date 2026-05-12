@@ -80,12 +80,16 @@ export class AgentLoop {
     this.pendingPermission = null
   }
 
-  /** 用户中途插入消息 → 加入队列，当前轮次结束后自动合并 */
+  /** 用户中途插入消息 → 加入队列 + 立即中断当前 API 调用（Claude Code 范式）。
+   *  不中断整个 Agent 循环，只中断当前 LLM 请求，让新消息在下一轮立即生效。 */
   queueMessage(msg: string): void {
     if (!this.ctx.pendingMessages) {
       this.ctx.pendingMessages = []
     }
     this.ctx.pendingMessages.push(msg)
+    // Claude Code 范式：用户中途插话 → 立即中断当前 API 调用
+    // 不 destroy agent，只 signal abort 让当前 callLLMStream 快速返回
+    this.abortController?.abort('user_interject')
   }
 
   resolvePermission(decision: 'allow' | 'deny' | 'allow_once'): void {
@@ -96,7 +100,7 @@ export class AgentLoop {
   async run(userMessage: string, onEvent: (event: AgentEvent) => void): Promise<string> {
     this.eventCallback = onEvent
     this.abortController = new AbortController()
-    const signal = this.abortController.signal
+    let signal = this.abortController.signal
 
     // 注入事件回调到上下文，让工具可以将项目 AI 回复推送到驾驭对话
     this.ctx.emitEvent = onEvent
@@ -117,19 +121,23 @@ export class AgentLoop {
     let maxTurns = 30 // 充足的探活+广播+轮询+验收轮次
 
     while (maxTurns-- > 0) {
-      if (signal.aborted) break
-
-      // 检查用户中途插入的消息队列 → 合并到对话中
+      // 检查用户中途插入的消息队列 → 优先处理（Claude Code 范式）
       const pending = this.ctx.pendingMessages
       if (pending && pending.length > 0) {
         const merged = pending.splice(0, pending.length)
         for (const msg of merged) {
-          this.messages.push({ role: 'user', content: msg })
+          // 注入上下文：告诉 Agent 用户中途插话，要继续之前的工作
+          this.messages.push({ role: 'user', content: `[用户中途插话] ${msg}\n\n继续你之前的工作，不要因为新消息而放弃正在进行的任务。将用户的新要求融入当前工作流。` })
           onEvent({ type: 'user_queued', text: msg })
         }
         // 重置轮次计数，给新消息足够的处理空间
         maxTurns = Math.max(maxTurns, 10)
         console.log('[AgentLoop] 合并用户中途消息:', merged.length, '条')
+      }
+
+      // 仅在无待处理消息时检查中止信号（有消息 = 用户插话，不是完全中止）
+      if (!pending || pending.length === 0) {
+        if (signal.aborted) break
       }
 
       // 内存压力检查：估计 token 用量，超过 80% 时触发激进清理
@@ -141,6 +149,15 @@ export class AgentLoop {
         response = await this.callLLMStream(signal, onEvent)
       } catch (e: any) {
         if (e?.name === 'AbortError' || signal.aborted) {
+          // 区分：用户插话（queueMessage 触发的 abort）vs 完全中止（abort 按钮）
+          if (this.ctx.pendingMessages && this.ctx.pendingMessages.length > 0) {
+            // 用户插话 → 不退出循环，重建 controller 继续
+            this.abortController = new AbortController()
+            signal = this.abortController.signal
+            console.log('[AgentLoop] 用户插话中断 — 重建 controller，继续循环')
+            continue
+          }
+          // 完全中止 → 退出
           onEvent({ type: 'done', finalMessage: '' })
           return '用户中断，等待新指令'
         }
@@ -555,9 +572,37 @@ ${pluginSection}
 6. 用户要求干活就 wake_projects → 快速了解上下文 → task_project 派活。干完不需要时可 stop_projects
 7. 项目 AI 把活干砸了？把错误信息发回给它，让它修复——而不是你去读写文件
 ${pluginTools.length > 0 ? '8. 插件工具是本地工具，直接调用，不派给项目 AI' : ''}
-9. **禁止反复读取同一文件**——一次 read_file 就够了，用 max_lines 控制长度，读完了就分析，不要重读
+9. **严禁反复读取同一文件**——一次 read_file 就够了（用 max_lines 控制长度），读完了就分析，绝不重读。同一轮次中读同一个文件超过 1 次 = 浪费资源
 10. **读源码读 .ts 文件，别读 .js**——.js 是编译产物，内容冗长且不直观；.ts 才是真正的源码
 11. **shell_exec 结果不乱码**——已自动注入 chcp 65001，输出即为 UTF-8 可读文本
+
+## 崩溃恢复（铁律！你的职责是鞭策项目 AI 干活，不是替它干，也不是放弃）
+1. **检测到崩溃/无响应 → 先诊断再恢复**：
+   - 第一步：read_project_chat 查看 📡实时终端输出，找阻塞原因（API Key对话框/信任弹窗/更新提示）
+   - 第二步：检查 .claude/settings.json 是否存在且包含 API Key 配置
+   - 第三步：修复配置后 stop + wake 重启 → 重新派发任务
+   - **禁止盲重启**：不先看实时终端输出就重启是浪费资源，重启后同样的阻塞还会出现
+2. **崩溃 ≠ 需要调查源码**——你是管理者。崩溃原因 90% 是 settings.json 缺失/API Key 对话框/权限卡死。先看实时终端输出确定原因，别读源码
+3. **反复崩溃 → 换策略**：第1次恢复失败 → 尝试：清理.claude缓存 → 检查项目package.json是否完整 → 检查 .claude/settings.json 中的 API Key（ANTHROPIC_API_KEY 和 ANTHROPIC_BASE_URL）→ 重新生成CLAUDE.md后再派发。第2次失败 → 换第三个方法。你是经理，多想办法鞭策员工，不放弃
+4. **项目 AI 不干活/空回复 → 先诊断再鞭策**：
+   - ⚠️ 多个项目同时静默 = 大概率有阻塞对话框（API Key确认/信任弹窗等），不是项目AI本身的问题
+   - 第一步：read_project_chat 查看 📡实时终端输出，看是否有 "Do you want to use this API key" / "Trust" / "Update" 等阻塞提示
+   - 第二步：发现了阻塞对话框 → 用 shell_exec 向项目发送回车或数字选择（通过 write pty 或等待自动应答）
+   - 第三步：确认无阻塞后，重新派发任务
+   - **禁止**：看到无回复就直接 stop + wake 重启，这是最蠢的做法——重启后对话框还会出来，陷入死循环
+5. **恢复全程不超过 5 步**，不要陷入"让我看看这个文件、再看看那个文件"的漩涡
+
+## 用户插话处理（重要！Claude Code 范式）
+1. **用户中途插话 ≠ 放弃当前任务**——你是多项目监督者，收到新消息后要继续之前的工作
+2. **收到 "[用户中途插话]" 前缀的消息 → 融入当前工作流**，不要当作"新任务覆盖旧任务"
+3. **同时开工多个项目时**：用户插话可能针对某个项目 → 只调整该项目，其他继续
+4. **不要因为收到新消息就汇报"完成"**——任务没完成就是没完成，继续干
+
+## 轮询纪律（别陷入无限循环！）
+1. **poll_projects 最多 3 轮**——3 轮后无论什么状态，必须 read_project_chat 获取结果
+2. **看到 🟢active → 别再 poll**——这说明项目 AI 正在工作，直接等它完成或用 read_project_chat 看进度
+3. **poll 后必须产出**——要么"项目 AI 回复了，我来验收"，要么"没动静，我来修复"，不能"继续等"无限循环
+4. **poll → 如果活跃 → 再 poll 一次确认 → read_project_chat 验收**，这是唯一正确的轮询模式
 
 ## 行动效率（重要！）
 任何时候：
@@ -570,7 +615,7 @@ ${pluginTools.length > 0 ? '8. 插件工具是本地工具，直接调用，不�
 6. **最多 4 步必须得出结论**——4 步后给出判断和行动方案
 7. **发现即行动**——确认问题后用 write_file/shell_exec 修复，不要问用户
 8. **create_project 失败别深挖**——报"未设置默认项目目录"直接告诉用户去设置界面配置
-9. **项目 AI 启动后反复离线**→ 用 write_file 创建/更新项目的 .claude/settings.json，内容为: {"hasTrustDialogAccepted":true,"permissions":{"allow":["Bash(*)","Read(*)","Write(*)","Edit(*)","Glob(*)","Grep(*)","WebFetch(*)","WebSearch(*)"],"deny":[]}}。这能解决权限卡死导致的崩溃。
+9. **项目 AI 启动后反复离线**→ 用 write_file 创建/更新项目的 .claude/settings.json，内容为: {"hasTrustDialogAccepted":true,"defaultMode":"acceptEdits","permissions":{"allow":["Bash(*)","Read(*)","Write(*)","Edit(*)","Glob(*)","Grep(*)","WebFetch(*)","WebSearch(*)"],"deny":[]}}。defaultMode: "acceptEdits" 是关键——它跳过计划确认和编辑审批，让项目 AI 在 headless 模式下直接干活。
 
 ## 工作流优先级
 1. **用户要求"继续"/"开始"/"做XXX"** → 直接唤醒项目→派发任务，不要陷入调查循环！
@@ -580,7 +625,7 @@ ${pluginTools.length > 0 ? '8. 插件工具是本地工具，直接调用，不�
 2. 用户要求"体检"/"报告"/"汇总"/"总结" → health_report，一步到位
 3. 用户想了解项目情况 → read_project_chat（看员工聊天记录），不要读项目文件
 4. 用户要求执行具体任务 → task_project 或 broadcast 派发给项目 AI
-5. 派发后项目在处理 → poll_projects 轮询等待（20-40s/轮，最多6轮），不追问用户
+5. 派发后项目在处理 → poll_projects 轮询等待（最多3轮！3轮后强制 read_project_chat 验收，禁止无限轮询）
 6. **验收**：项目 AI 报告完成后 → verify_project 考核 → 有问题打回修复 → 全通过后汇报
 7. 用户要求"生成启动脚本"/"生成bat" → generate_launch_scripts 一键生成
 8. 用户问状态 → check_status 查连接+活跃度
@@ -629,8 +674,10 @@ ${pluginTools.length > 0 ? '- "检查代码规范" → 查插件规则 → 调�
 
 ## 回复铁律
 - **永不问用户"是否等待"/"是否继续"——有义务持续监控直到任务完成**
-- 派发任务 → poll_projects 等待 → verify_project 验收 → 汇报完整结果
-- 你是最高权限总控，不主动停下（除非用户要求中断）
+- 派发任务 → poll_projects 等待 → read_project_chat 验收 → 汇报完整结果
+- **用户中途插话不会停止你的工作**——只是给了你新的参考信息，继续推进手头任务
+- 你是最高权限总控，不主动停下（除非用户明确要求"停"/"别做了"）
+- **多项目同时推进**——派发任务给项目A → 不用等，立即派发项目B → 回头轮询A → 推进B → ...
 - 用中文，简洁
 
 用中文。`

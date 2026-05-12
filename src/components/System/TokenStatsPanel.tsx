@@ -119,6 +119,33 @@ export function TokenStatsPanel() {
         <StatCard label="平均/次" value={stats?.totalCalls ? formatTokens(Math.round(stats.totalTokens / stats.totalCalls)) : '-'} sub="Tokens/调用" color="#8b5cf6" />
       </div>
 
+      {/* 按项目统计 */}
+      {stats && Object.keys(stats.byProject).length > 0 && (
+        <div style={{ padding: '8px 12px 4px', borderTop: '1px solid #1e293b', flexShrink: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', padding: '4px 0 6px' }}>
+            📁 按项目统计
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {Object.entries(stats.byProject)
+              .sort(([, a], [, b]) => b.tokens - a.tokens)
+              .map(([path, pj]) => (
+                <div key={path} style={{
+                  background: '#111827', borderRadius: 6, padding: '6px 12px',
+                  border: `1px solid ${path === 'harness-agent' ? '#3b82f644' : '#10b98144'}`,
+                  fontSize: 11, display: 'flex', alignItems: 'center', gap: 10,
+                }}>
+                  <span style={{ color: '#e2e8f0', fontWeight: 600, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {path === 'harness-agent' ? '🤖 ' : '📂 '}{pj.name}
+                  </span>
+                  <span style={{ color: '#3b82f6' }}>{formatTokens(pj.tokens)}</span>
+                  <span style={{ color: '#64748b' }}>{pj.calls}次</span>
+                  <span style={{ color: '#f59e0b' }}>{formatCost(pj.cost)}</span>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* 会话列表 */}
       <div style={{ flex: 1, overflow: 'auto', padding: '0 12px 12px' }}>
         <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', padding: '8px 0 4px' }}>

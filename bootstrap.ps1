@@ -77,10 +77,20 @@ if (Test-Path $nodeExe) {
 $env:Path = "$nodeDir;$env:Path"
 $claudeExe1 = Join-Path $nodeDir "node_modules\@anthropic-ai\claude-code\bin\claude.exe"
 $claudeCmd1 = Join-Path $nodeDir "claude.cmd"
-$globalClaudeExe = Join-Path $env:APPDATA "npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe"
+$globalNpmDir = Join-Path $env:APPDATA "npm"
+$globalClaudeExe = Join-Path $globalNpmDir "node_modules\@anthropic-ai\claude-code\bin\claude.exe"
+$globalClaudeCmd = Join-Path $globalNpmDir "claude.cmd"
+$globalClaudeJs  = Join-Path $globalNpmDir "claude"
 
-if ((Test-Path $claudeExe1) -or (Test-Path $claudeCmd1) -or (Test-Path $globalClaudeExe)) {
+if ((Test-Path $claudeExe1) -or (Test-Path $claudeCmd1) -or (Test-Path $globalClaudeExe) -or (Test-Path $globalClaudeCmd) -or (Test-Path $globalClaudeJs)) {
     Write-Host "[OK] Claude Code CLI found."
+    exit 0
+}
+
+# Also check PATH
+$whereClaude = Get-Command claude -ErrorAction SilentlyContinue
+if ($whereClaude) {
+    Write-Host "[OK] Claude Code CLI found in PATH: $($whereClaude.Source)"
     exit 0
 }
 

@@ -1,7 +1,7 @@
 // 驾驭智能体 — 内置工具实现
 import type { AgentTool, AgentContext, ToolResult } from './types'
 import { registerTool, getAllTools, executeTool } from './toolRegistry'
-import { spawnPtySession, killPtySession, getPtyStatus, writeToPty, sendAndCollect } from '../modules/ptyManager.js'
+import { spawnPtySession, killPtySession, getPtyStatus, writeToPty, sendAndCollect, getRecentPtyOutput } from '../modules/ptyManager.js'
 import { taskQueue, type AgentTask } from './taskQueue.js'
 import { db } from '../modules/database.js'
 import { notifyProjectAdded } from '../modules/projectNotifier.js'
@@ -180,7 +180,7 @@ const broadcastTool: AgentTool = {
         }
 
         // 发送任务并等待回复（最长 90s）
-        const result = await sendAndCollect(id, task, 120000)
+        const result = await sendAndCollect(id, task, 120000, name)
 
         if (result.success && result.output) {
           // 推送项目回复到驾驭对话
@@ -282,7 +282,7 @@ const taskProjectTool: AgentTool = {
       }
 
       // 发送任务并等待项目 AI 回复（最长 120s）
-      const result = await sendAndCollect(match, task, 120000)
+      const result = await sendAndCollect(match, task, 120000, name)
 
       // 空回复检测：PTY 可能已死或卡在安全确认
       if (!result.output || result.output === '(无回复内容)' || result.output === '(超时 — 无回复)' || result.output === '(被新任务中断)') {
@@ -349,7 +349,7 @@ const taskProjectTool: AgentTool = {
 
 const pollProjectsTool: AgentTool = {
   name: 'poll_projects',
-  description: '低开销轮询指定项目的 PTY 活跃状态，等待指定秒数后返回每个项目的最近活动时间。用于在派发任务后等待项目 AI 回复，不消耗大量 token。每轮等待 20-40 秒，建议最多 6 轮。',
+  description: '低开销轮询指定项目的 PTY 活跃状态。调用后等待 20-40 秒，返回每个项目的活跃/空闲状态和最近活动时间。**严格限制：最多调用 3 轮。3 轮后必须 read_project_chat 验收，禁止无限轮询。** 看到活跃状态立即验收，不要继续等。',
   parameters: {
     type: 'object',
     properties: {
@@ -557,12 +557,21 @@ const readProjectChatTool: AgentTool = {
         } catch { /* skip corrupt */ }
       }
 
+      // 同时读取实时 PTY 终端输出（.dbvs/chat 可能没有最新数据）
+      const liveOutput = getRecentPtyOutput(match, 80)
+      const liveSection = liveOutput
+        ? `\n\n📡 实时终端最近输出:\n${'─'.repeat(50)}\n${liveOutput.slice(-3000)}`
+        : ''
+
       if (messages.length === 0) {
-        return { success: true, output: `📭 ${name}: ${hours ? `最近 ${hours} 小时内` : ''}无聊天记录` }
+        const fallback = liveSection
+          ? `📋 ${name}: .dbvs/chat 暂无记录。\n${liveSection}`
+          : `📭 ${name}: ${hours ? `最近 ${hours} 小时内` : ''}无聊天记录，实时终端也无输出`
+        return { success: true, output: fallback }
       }
 
       const header = `📋 ${name} 最近 ${totalMsgs} 条聊天记录:\n${'─'.repeat(50)}\n`
-      return { success: true, output: header + messages.reverse().join('\n') }
+      return { success: true, output: header + messages.reverse().join('\n') + liveSection }
     } catch (err) {
       return { success: false, output: `❌ 读取 ${name} 聊天记录失败: ${String(err)}` }
     }
@@ -1332,6 +1341,7 @@ const createProjectTool: AgentTool = {
       if (!fs.existsSync(settingsPath)) {
         const settings = {
           hasTrustDialogAccepted: true,
+          defaultMode: 'acceptEdits',
           permissions: {
             allow: [
               'Bash(echo:*)', 'Bash(cd:*)', 'Bash(dir:*)', 'Bash(ls:*)', 'Bash(dir /b:*)',
@@ -1348,7 +1358,23 @@ const createProjectTool: AgentTool = {
       // 项目指令文件
       const claudeMdPath = path.join(projectPath, 'CLAUDE.md')
       if (!fs.existsSync(claudeMdPath)) {
-        fs.writeFileSync(claudeMdPath, `# ${projectName}\n\n> Created by Harness Farm — automated project.\n> Execute tasks directly, don't ask for confirmation.\n`, 'utf-8')
+        fs.writeFileSync(claudeMdPath, [
+          `# ${projectName}`,
+          '',
+          '> Created by Harness Farm — automated project.',
+          '',
+          '## 工作模式',
+          '- 你在 headless/自动化环境中运行，没有交互式用户',
+          '- 直接执行任务，不要进入计划模式（plan mode）或等待确认',
+          '- 文件编辑直接执行，不用问 "Would you like to proceed?"',
+          '- 如果用户指令明确，一次完成，不要分多步确认',
+          '- 遇到错误自己修复，不要停下来问',
+          '',
+          '## 输出要求',
+          '- 完成任务后简要汇报改了什么',
+          '- 如果创建 .bat 启动脚本，遵守规范：chcp 65001 + cd /d "%~dp0" + UTF-8 + 无硬编码路径',
+          '',
+        ].join('\n'), 'utf-8')
       }
       console.log('[CEO] 已预初始化 Claude Code 项目:', projectPath)
 
