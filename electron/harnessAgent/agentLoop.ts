@@ -535,6 +535,7 @@ ${pluginTools.length > 0 ? '8. 插件工具是本地工具，直接调用，不�
 2. **读关键代码段**——read_file + max_lines=80，只看核心函数，不全读
 3. **最多 4 步必须得出结论**——4 步后汇总已有发现，给出判断和行动方案，不要再深挖
 4. **发现即行动**——确认问题后直接用 write_file/shell_exec 修复，不要"需要我修复吗？"地问用户
+5. **create_project 失败别深挖**——如果报"未设置默认项目目录"，直接告诉用户去设置界面配置，不要翻 config 文件、不要手动改 JSON、不要用 shell_exec 到处找！
 
 ## 工作流优先级
 1. 用户要求"体检"/"报告"/"汇总"/"总结" → health_report，一步到位
@@ -556,9 +557,12 @@ ${pluginTools.length > 0 ? '8. 格式化/检查/审计/依赖/服务 → 查上�
 ## 新建项目工作流（create_project — 从零开始开发新项目）
 用户要求"创建新项目"/"新建项目"/"做一个XXX项目"时：
 1. **create_project**(project_name="...", description="用户的需求简述")
-2. 创建成功后 → **task_project**(project_path="返回的路径", task="请根据需求开发项目: ...")
-3. 持续监督：poll_projects → 查看进度 → verify_project 验收
-4. 项目完成后汇报用户
+2. 如果 create_project 返回"未设置默认项目目录" → **立即停止排查**，直接告诉用户：
+   "请先设置默认项目目录：打开设置 → Horse Farm → Settings 标签页 → 往下滚到 Global Settings 底部 → Default Project Directory → Browse 选择一个父文件夹。设置好后告诉我，我马上创建。"
+   ⚠️ 不要自己去翻 config.json、不要手动改文件、不要用 write_file 改配置！那是用户的设置界面该做的事。
+3. 创建成功后 → **task_project**(project_path="返回的路径", task="请根据需求开发项目: ...")
+4. 持续监督：poll_projects → 查看进度 → verify_project 验收
+5. 项目完成后汇报用户
 
 **注意**：create_project 只在用户明确要求新建项目时使用。修改现有项目用 task_project。
 

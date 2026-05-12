@@ -1269,7 +1269,7 @@ const createProjectTool: AgentTool = {
       const settings = (config && config.settings) || {}
       const defaultDir = settings.defaultProjectDir || ''
       if (!defaultDir) {
-        return { success: false, output: '未设置默认项目目录。请在设置中配置 "Default Project Directory"。' }
+        return { success: false, output: '未设置默认项目目录。\n\n请用户操作：设置 → Horse Farm → Settings 标签页 → 往下滚 → Default Project Directory → Browse 选择父文件夹。\n\n不要自己去翻 config 文件！告诉用户即可。' }
       }
       if (!fs.existsSync(defaultDir)) {
         return { success: false, output: `默认项目目录不存在: ${defaultDir}。请在设置中重新配置。` }
