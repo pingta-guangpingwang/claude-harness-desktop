@@ -570,6 +570,41 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
             />
           </div>
         </div>
+
+        {/* Default Project Directory — 驾驭智能体创建新项目的默认位置 */}
+        <div style={{ marginTop: '18px', paddingTop: '18px', borderTop: '1px solid #e5e7eb' }}>
+          <label style={{ fontSize: '12px', fontWeight: 600, color: '#1f2937', display: 'block', marginBottom: '6px' }}>
+            Default Project Directory
+          </label>
+          <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#6b7280', lineHeight: 1.5 }}>
+            When the Harness Agent creates a new project, it will create a folder here, add it to the farm, and start Claude Code to build the project from scratch.
+          </p>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <div style={{
+              flex: 1, background: '#f9fafb', borderRadius: '7px', border: '1px solid #d1d5db',
+              padding: '8px 12px', fontSize: '12px', fontFamily: 'Consolas, monospace',
+              color: config.settings.defaultProjectDir ? '#1f2937' : '#9ca3af',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {config.settings.defaultProjectDir || 'Not set — choose a parent directory for new projects'}
+            </div>
+            <button
+              onClick={async () => {
+                const result = await window.electronAPI.browseFolder()
+                if (result.success && result.path) {
+                  onConfigChange({ ...config, settings: { ...config.settings, defaultProjectDir: result.path } })
+                }
+              }}
+              style={{
+                padding: '8px 16px', borderRadius: '7px', border: '1px solid #d1d5db',
+                background: '#fff', color: '#374151', cursor: 'pointer',
+                fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap',
+              }}
+            >
+              Browse...
+            </button>
+          </div>
+        </div>
       </div>
 
       <hr style={{ border: 'none', borderTop: '1px solid #e5e7eb', margin: '24px 0' }} />

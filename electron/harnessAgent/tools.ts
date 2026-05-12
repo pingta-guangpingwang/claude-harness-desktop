@@ -3,6 +3,7 @@ import type { AgentTool, AgentContext, ToolResult } from './types'
 import { registerTool, getAllTools, executeTool } from './toolRegistry'
 import { spawnPtySession, killPtySession, getPtyStatus, writeToPty, sendAndCollect } from '../modules/ptyManager.js'
 import { taskQueue, type AgentTask } from './taskQueue.js'
+import { db } from '../modules/database.js'
 import fs from 'fs'
 import path from 'path'
 
@@ -1242,6 +1243,86 @@ const writeFileTool: AgentTool = {
   },
 }
 
+// ============== P-INFRA CEO项目管理工具 ==============
+
+const createProjectTool: AgentTool = {
+  name: 'create_project',
+  description: 'CEO新建项目。在默认项目目录下创建空文件夹，加入驾驭工程，唤醒Claude Code终端，然后由项目AI从头开发。仅限CEO用于新项目。',
+  parameters: {
+    type: 'object',
+    properties: {
+      project_name: { type: 'string', description: '项目名称（将用作文件夹名）' },
+      description: { type: 'string', description: '项目简述（可选，会传给项目AI）' },
+    },
+    required: ['project_name'],
+  },
+  group: 'infra',
+  isReadOnly: false,
+  isConcurrencySafe: false,
+  isDestructive: false,
+  async execute(_params: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
+    const projectName = _params.project_name as string
+    const description = (_params.description as string) || ''
+    try {
+      // 1. 读取默认项目目录
+      const config = await db.getConfig()
+      const settings = config.settings || {}
+      const defaultDir = settings.defaultProjectDir || ''
+      if (!defaultDir) {
+        return { success: false, output: '未设置默认项目目录。请在设置中配置 "Default Project Directory"。' }
+      }
+      if (!fs.existsSync(defaultDir)) {
+        return { success: false, output: `默认项目目录不存在: ${defaultDir}。请在设置中重新配置。` }
+      }
+
+      // 2. 创建项目文件夹
+      const projectPath = path.join(defaultDir, projectName)
+      if (fs.existsSync(projectPath)) {
+        return { success: false, output: `项目路径已存在: ${projectPath}。请换一个项目名称。` }
+      }
+      fs.mkdirSync(projectPath, { recursive: true })
+      console.log('[CEO] 创建新项目目录:', projectPath)
+
+      // 3. 注册到项目列表
+      const projectIds = await db.getProjectIds()
+      const ids: string[] = projectIds.ids || []
+      const individualProjects: Record<string, any> = projectIds.individualProjects || {}
+      if (!ids.includes(projectPath)) {
+        ids.push(projectPath)
+      }
+      individualProjects[projectPath] = {
+        name: projectName,
+        path: projectPath,
+        repoPath: '',
+        source: 'individual',
+        status: 'synced',
+      }
+      await db.setProjectIds({ ids, individualProjects })
+      console.log('[CEO] 项目已注册到驾驭工程:', projectPath)
+
+      // 4. 唤醒 Claude Code 终端
+      const spawnResult = await spawnPtySession(projectPath)
+      if (!spawnResult.success) {
+        return { success: false, output: `项目目录已创建并注册，但 Claude Code 启动失败: ${spawnResult.message}` }
+      }
+
+      const descLine = description ? `\n📝 需求: ${description}` : ''
+      return {
+        success: true,
+        output: `✅ 新项目创建完成！
+
+📁 路径: ${projectPath}
+🆔 名称: ${projectName}
+🔌 Claude Code: 已启动 (PID ${spawnResult.pid})${descLine}
+
+下一步：使用 task_project(project_path="${projectPath}", task="请根据需求开发项目...") 派发开发任务给项目 AI。`,
+      }
+    } catch (e: any) {
+      return { success: false, output: `创建项目失败: ${e.message}` }
+    }
+  },
+}
+
 // ============== 注册全部工具 ==============
 
 export function registerAllTools(): void {
@@ -1269,4 +1350,6 @@ export function registerAllTools(): void {
   registerTool(shellExecTool)
   registerTool(readFileTool)
   registerTool(writeFileTool)
+  // P-INFRA — CEO项目管理
+  registerTool(createProjectTool)
 }

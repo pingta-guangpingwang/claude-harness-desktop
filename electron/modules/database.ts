@@ -25,7 +25,7 @@ async function write(name: string, data: any): Promise<void> {
 }
 
 export const db = {
-  getConfig: () => read('config', { projectIds: [], apiKeys: [], settings: {} }),
+  getConfig: () => read('config', { projectIds: [], apiKeys: [], settings: { defaultProjectDir: '' } }),
   setConfig: (data: any) => write('config', data),
 
   getRootPath: async (): Promise<string> => {

@@ -97,6 +97,7 @@ export interface HFConfig {
     defaultMaxTokens: number
     pollingIntervalMs: number
     maxConcurrentTasks: number
+    defaultProjectDir: string
   }
 }
 
@@ -113,4 +114,5 @@ export const DEFAULT_API_CONFIG = {
   defaultMaxTokens: 4096,
   pollingIntervalMs: 5000,
   maxConcurrentTasks: 3,
+  defaultProjectDir: '',
 }

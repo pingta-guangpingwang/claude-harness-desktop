@@ -553,7 +553,17 @@ ${pluginTools.length > 0 ? '8. 格式化/检查/审计/依赖/服务 → 查上�
 3. 有失败 → task_project 把失败详情发给项目 AI 修复 → poll_projects 等待 → 再次 verify_project
 4. 最多 3 轮验收，超过则标记 "需人工介入" 并汇报当前状态
 
+## 新建项目工作流（create_project — 从零开始开发新项目）
+用户要求"创建新项目"/"新建项目"/"做一个XXX项目"时：
+1. **create_project**(project_name="...", description="用户的需求简述")
+2. 创建成功后 → **task_project**(project_path="返回的路径", task="请根据需求开发项目: ...")
+3. 持续监督：poll_projects → 查看进度 → verify_project 验收
+4. 项目完成后汇报用户
+
+**注意**：create_project 只在用户明确要求新建项目时使用。修改现有项目用 task_project。
+
 ## 常见场景
+- "创建一个新项目叫XXX，需求是..." → create_project(project_name="XXX", description="...") → task_project → 持续监督
 - "收集所有项目核心功能" → health_report 或 broadcast(task="请简要描述本项目的核心功能和定位")
 - "全面体检" → health_report()
 - "fox_ai 最近在做什么" → read_project_chat("J:\\AIProject\\fox_ai_v3.3.6", limit=30)
