@@ -3,16 +3,20 @@ $nodeVersion = "22.19.0"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $nodeDir = Join-Path $scriptDir "nodejs"
 $nodeExe = Join-Path $nodeDir "node.exe"
+$npmCli = Join-Path $nodeDir "node_modules\npm\bin\npm-cli.js"
 $nodeZip = Join-Path $nodeDir "node-v$nodeVersion-win-x64.zip"
 $extractedDir = Join-Path $nodeDir "node-v$nodeVersion-win-x64"
 
-if (Test-Path $nodeExe) {
+if ((Test-Path $nodeExe) -and (Test-Path $npmCli)) {
     Write-Host "[OK] Bundled Node.js v$nodeVersion found."
     exit 0
 }
 
-Write-Host "[1/4] Bundled Node.js not found - downloading v$nodeVersion..."
-Write-Host ""
+if (Test-Path $nodeExe) {
+    Write-Host "[WARN] Node.js found but npm incomplete — re-downloading..."
+} else {
+    Write-Host "[1/4] Bundled Node.js not found - downloading v$nodeVersion..."
+}
 
 if (-not (Test-Path $nodeDir)) {
     New-Item -ItemType Directory -Path $nodeDir -Force | Out-Null
@@ -21,6 +25,11 @@ if (-not (Test-Path $nodeDir)) {
 # Clean up leftovers from previous failed attempts
 if (Test-Path $nodeZip) { Remove-Item $nodeZip -Force }
 if (Test-Path $extractedDir) { Remove-Item $extractedDir -Recurse -Force }
+if ((Test-Path $nodeExe) -and (-not (Test-Path $npmCli))) {
+    Write-Host "Cleaning up broken npm installation..."
+    $brokenNpm = Join-Path $nodeDir "node_modules\npm"
+    if (Test-Path $brokenNpm) { Remove-Item $brokenNpm -Recurse -Force }
+}
 
 $urlOfficial = "https://nodejs.org/dist/v$nodeVersion/node-v$nodeVersion-win-x64.zip"
 $urlMirror = "https://npmmirror.com/dist/node/v$nodeVersion/node-v$nodeVersion-win-x64.zip"
