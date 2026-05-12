@@ -87,7 +87,11 @@ export function registerHarnessIpc(window: BrowserWindow) {
       }
 
       return { success: true, finalMessage }
-    } catch (err) {
+    } catch (err: any) {
+      // AbortError 是用户正常中断，不是错误
+      if (err?.name === 'AbortError') {
+        return { success: true, finalMessage: '' }
+      }
       return { success: false, error: String(err) }
     } finally {
       if (agentLoop) {

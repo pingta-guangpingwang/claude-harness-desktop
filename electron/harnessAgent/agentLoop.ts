@@ -114,8 +114,17 @@ export class AgentLoop {
       // 内存压力检查：估计 token 用量，超过 80% 时触发激进清理
       this.checkMemoryPressure()
 
-      // 调用 LLM
-      const response = await this.callLLMStream(signal, onEvent)
+      // 调用 LLM（捕获中断信号，避免 AbortError 泄漏到前端显示）
+      let response: Awaited<ReturnType<typeof this.callLLMStream>>
+      try {
+        response = await this.callLLMStream(signal, onEvent)
+      } catch (e: any) {
+        if (e?.name === 'AbortError' || signal.aborted) {
+          onEvent({ type: 'done', finalMessage: '' })
+          return '用户中断，等待新指令'
+        }
+        throw e
+      }
 
       // 记录 token 消耗
       if (response.usage) {
