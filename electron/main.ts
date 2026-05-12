@@ -6,6 +6,7 @@
 // =============================================================================
 
 import { app, BrowserWindow, Menu, ipcMain } from 'electron'
+import * as fs from 'fs'
 import * as path from 'path'
 import { registerDbhtIpc } from './modules/dbhtIpc.js'
 import { registerHorseFarmIpc } from './modules/horseFarmIpc.js'
@@ -151,15 +152,32 @@ async function startMiddlewareBox() {
   if (mwAlreadyRunning) {
     console.log('[CHD] MiddlewareBox 已运行，复用现有实例')
     setMiddlewareRunning(true)
-  } else {
-    console.log('[CHD] 启动 MiddlewareBox...')
-    const { spawn } = await import('child_process')
-    const MIDDLEWARE_BOX_PATH = path.resolve(__dirname, '..', '..', '..', 'DeepBlueGodMiddlewareBox')
-    const mwProcess = spawn('node', ['dist/start.js'], {
-      cwd: MIDDLEWARE_BOX_PATH,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_ENV: 'production' },
-    })
+    return
+  }
+
+  const MIDDLEWARE_BOX_PATH = path.resolve(__dirname, '..', '..', '..', 'DeepBlueGodMiddlewareBox')
+  if (!fs.existsSync(MIDDLEWARE_BOX_PATH)) {
+    console.log('[CHD] MiddlewareBox 目录不存在，跳过启动 (非核心组件)')
+    return
+  }
+
+  // 使用项目自带的 Node.js，避免 PATH 中找不到 node
+  const bundledNode = path.resolve(__dirname, '..', '..', 'nodejs', 'node.exe')
+  const nodeBin = fs.existsSync(bundledNode) ? bundledNode : 'node'
+
+  // 如果 node 不可用（PATH 里没有 + 项目也没自带），跳过启动
+  if (!fs.existsSync(nodeBin)) {
+    console.log('[CHD] Node.js 不可用，跳过 MiddlewareBox 启动 (非核心组件)')
+    return
+  }
+
+  console.log('[CHD] 启动 MiddlewareBox...')
+  const { spawn } = await import('child_process')
+  const mwProcess = spawn(nodeBin, ['dist/start.js'], {
+    cwd: MIDDLEWARE_BOX_PATH,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, NODE_ENV: 'production' },
+  })
 
     mwProcess.stdout?.on('data', (data: Buffer) => {
       const text = data.toString().trim()
@@ -186,11 +204,10 @@ async function startMiddlewareBox() {
       setMiddlewareRunning(false)
     })
 
-    setTimeout(async () => {
-      const ok = await probeMiddlewareHealth()
-      if (ok) setMiddlewareRunning(true)
-    }, 3000)
-  }
+  setTimeout(async () => {
+    const ok = await probeMiddlewareHealth()
+    if (ok) setMiddlewareRunning(true)
+  }, 3000)
 }
 
 // ---- App 生命周期 ----
