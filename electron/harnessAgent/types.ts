@@ -52,6 +52,8 @@ export interface AgentContext {
   maxAutonomousTurns?: number
   /** 事件回调 — 工具可通过此回调推送事件到驾驭聊天（用于 project_response / report_card） */
   emitEvent?: (event: AgentEvent) => void
+  /** 用户中途插入的消息队列 — Agent 每轮开始前检查并合并到对话中 */
+  pendingMessages?: string[]
 }
 
 export interface ToolCallRequest {
@@ -75,6 +77,8 @@ export type AgentEvent =
   | { type: 'project_response'; projectName: string; projectPath: string; content: string; timestamp: string }
   /** 可点击的体检报告卡片 */
   | { type: 'report_card'; title: string; summary: string; fullReport: string; projectCount: number; onlineCount: number }
+  /** 用户中途插入的消息已被合并 */
+  | { type: 'user_queued'; text: string }
 
 /** 权限决策 */
 export type PermissionDecision = 'allow' | 'deny' | 'allow_once'

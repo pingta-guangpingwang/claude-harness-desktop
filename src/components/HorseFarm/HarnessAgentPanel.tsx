@@ -42,7 +42,7 @@ type AgentTab = 'chat' | 'monitor'
 
 // Agent event from main process
 interface AgentEvent {
-  type: 'thinking_start' | 'text_delta' | 'tool_call' | 'tool_result' | 'tool_error' | 'permission_needed' | 'thinking_end' | 'done' | 'error' | 'project_response' | 'report_card'
+  type: 'thinking_start' | 'text_delta' | 'tool_call' | 'tool_result' | 'tool_error' | 'permission_needed' | 'thinking_end' | 'done' | 'error' | 'project_response' | 'report_card' | 'user_queued'
   content?: string
   id?: string
   name?: string
@@ -52,6 +52,7 @@ interface AgentEvent {
   reason?: string
   finalMessage?: string
   message?: string
+  text?: string
   // project_response
   projectName?: string
   projectPath?: string
@@ -237,6 +238,9 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
           setReportModal({ title: reportTitle, content: fullReport, visible: true })
           break
         }
+        case 'user_queued':
+          // 用户中途插入的消息已被 Agent 合并，无需额外日志（用户消息已在发送时显示）
+          break
       }
     })
     return unsubscribe
@@ -384,8 +388,11 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
       projectNamesMap[id] = hfProjects[id]?.projectName || id.split('\\').pop() || id
     }
 
-    setAgentRunning(true)
-    setAiThinking(true)
+    const wasRunning = agentRunning
+    if (!wasRunning) {
+      setAgentRunning(true)
+      setAiThinking(true)
+    }
 
     try {
       const res = await window.electronAPI.harnessSend({
@@ -399,14 +406,21 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
       })
       if (!res.success) {
         addStoreLog({ type: 'ai-error', text: `Agent 错误: ${res.error || '未知'}` })
+        if (!wasRunning) {
+          setAiThinking(false)
+          setAgentRunning(false)
+        }
+      } else if ((res as any).queued) {
+        // 消息已加入队列，Agent 处理完后会通过事件推送
+        addStoreLog({ type: 'system', text: '📥 消息已加入队列，待 AI 处理...' })
+      }
+      // res.success 非 queued 时 finalMessage 已通过 'done' 事件处理
+    } catch (err) {
+      addStoreLog({ type: 'ai-error', text: `Agent 调用失败: ${String(err).slice(0, 120)}` })
+      if (!wasRunning) {
         setAiThinking(false)
         setAgentRunning(false)
       }
-      // res.success 时 finalMessage 已通过 'done' 事件处理
-    } catch (err) {
-      addStoreLog({ type: 'ai-error', text: `Agent 调用失败: ${String(err).slice(0, 120)}` })
-      setAiThinking(false)
-      setAgentRunning(false)
     }
   }, [agentInput, hfConfig, projectIds, hfProjects, heartbeats, permissions, wakeAllTerminals, stopAllTerminals, checkStatus, generateLaunchBatsAll])
 

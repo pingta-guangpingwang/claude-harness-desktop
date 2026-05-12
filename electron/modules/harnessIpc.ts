@@ -64,9 +64,14 @@ export function registerHarnessIpc(window: BrowserWindow) {
       maxAutonomousTurns: request.autonomous ? 10 : undefined,
     }
 
-    // 中止正在运行的循环
+    // 如果 Agent 正在运行，将消息加入队列（不中断）
     if (agentLoop) {
-      agentLoop.abort()
+      agentLoop.queueMessage(request.message)
+      conversationMemory.push({ role: 'user', content: request.message })
+      while (conversationMemory.length > MAX_MEMORY_TURNS) {
+        conversationMemory.shift()
+      }
+      return { success: true, queued: true }
     }
 
     agentLoop = new AgentLoop(ctx, permissionManager, conversationMemory)

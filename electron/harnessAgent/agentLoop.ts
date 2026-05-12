@@ -80,6 +80,14 @@ export class AgentLoop {
     this.pendingPermission = null
   }
 
+  /** 用户中途插入消息 → 加入队列，当前轮次结束后自动合并 */
+  queueMessage(msg: string): void {
+    if (!this.ctx.pendingMessages) {
+      this.ctx.pendingMessages = []
+    }
+    this.ctx.pendingMessages.push(msg)
+  }
+
   resolvePermission(decision: 'allow' | 'deny' | 'allow_once'): void {
     this.pendingPermission?.resolve(decision)
     this.pendingPermission = null
@@ -110,6 +118,19 @@ export class AgentLoop {
 
     while (maxTurns-- > 0) {
       if (signal.aborted) break
+
+      // 检查用户中途插入的消息队列 → 合并到对话中
+      const pending = this.ctx.pendingMessages
+      if (pending && pending.length > 0) {
+        const merged = pending.splice(0, pending.length)
+        for (const msg of merged) {
+          this.messages.push({ role: 'user', content: msg })
+          onEvent({ type: 'user_queued', text: msg })
+        }
+        // 重置轮次计数，给新消息足够的处理空间
+        maxTurns = Math.max(maxTurns, 10)
+        console.log('[AgentLoop] 合并用户中途消息:', merged.length, '条')
+      }
 
       // 内存压力检查：估计 token 用量，超过 80% 时触发激进清理
       this.checkMemoryPressure()
