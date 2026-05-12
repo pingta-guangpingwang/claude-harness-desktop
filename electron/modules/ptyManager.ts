@@ -499,7 +499,11 @@ export function sendAndCollect(
           return
         }
       }
-      session.pty.write(task + '\r')
+      // 分两次写入：先写任务文本，再单独发 Enter。
+      // Claude Code TUI 在 raw 模式下，\r 和文本一起 blast 会当作普通字符而非提交键
+      session.pty.write(task)
+      await new Promise(r => setTimeout(r, 150))
+      session.pty.write('\r')
       // 写入后才启动空闲计时
       resetIdle()
       console.log('[PTY] sendAndCollect →', key.slice(-40), 'task:', task.slice(0, 80))
