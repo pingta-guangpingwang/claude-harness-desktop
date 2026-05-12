@@ -571,7 +571,7 @@ const readProjectChatTool: AgentTool = {
 
 const healthReportTool: AgentTool = {
   name: 'health_report',
-  description: '对全部或指定项目进行全面体检：PTY 连接状态 + 最近聊天记录摘要 + 工作状态分析。生成结构化的中文健康报告。直接返回报告内容，无需再向项目 AI 提问。',
+  description: '【仅在用户明确要求"体检"/"报告"/"健康检查"时使用】对全部或指定项目进行全面体检：PTY 连接状态 + 最近聊天记录摘要 + 工作状态分析。生成结构化的中文健康报告。日常检查状态请用 check_status。',
   parameters: {
     type: 'object',
     properties: {
