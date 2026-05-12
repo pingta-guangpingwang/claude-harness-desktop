@@ -3,6 +3,7 @@ import { ipcMain } from 'electron'
 import { RuleEngine } from '../ruleEngine'
 import { AuditLogger } from '../auditLogger'
 import { PerformanceMonitor } from '../performanceMonitor'
+import { getTokenStore, type TokenRecord } from './tokenStore'
 
 let ruleEngine: RuleEngine
 let auditLogger: AuditLogger
@@ -149,5 +150,34 @@ export function registerSystemIpc(): void {
   ipcMain.handle('perf:ipc-end', (_event, id: string) => {
     perfMonitor.trackIPCEnd(id)
     return { success: true }
+  })
+
+  // ---- Token 消耗统计 IPC ----
+  ipcMain.handle('token:stats', async () => {
+    try {
+      const stats = getTokenStore().getStats()
+      return { success: true, stats }
+    } catch (err) {
+      return { success: false, error: String(err), stats: null }
+    }
+  })
+
+  ipcMain.handle('token:history', async (_event, limit?: number) => {
+    try {
+      const records = getTokenStore().readAll().slice(-(limit || 500))
+      return { success: true, records }
+    } catch (err) {
+      return { success: false, error: String(err), records: [] }
+    }
+  })
+
+  ipcMain.handle('token:conversation', async (_event, conversationId: string) => {
+    try {
+      const records = getTokenStore().getConversationRecords(conversationId)
+      const turns = getTokenStore().getConversationTurns(conversationId)
+      return { success: true, records, turns }
+    } catch (err) {
+      return { success: false, error: String(err), records: [], turns: [] }
+    }
   })
 }

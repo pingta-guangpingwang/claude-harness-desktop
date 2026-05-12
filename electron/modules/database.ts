@@ -43,6 +43,18 @@ export const db = {
   getProjectIds: () => read('project-ids', { ids: [], individualProjects: {} }),
   setProjectIds: (data: any) => write('project-ids', data),
 
+  getSetupCompleted: async (): Promise<boolean> => {
+    try {
+      const p = path.join(DATA_DIR, 'setup-completed.txt')
+      if (!await fs.pathExists(p)) return false
+      return (await fs.readFile(p, 'utf8')).trim() === '1'
+    } catch { return false }
+  },
+  setSetupCompleted: async (): Promise<void> => {
+    await fs.ensureDir(DATA_DIR)
+    await fs.writeFile(path.join(DATA_DIR, 'setup-completed.txt'), '1', 'utf8')
+  },
+
   getHubSettings: () => read('hub-settings', {
     minimizeToTray: true,
     autoStartEnabled: false,

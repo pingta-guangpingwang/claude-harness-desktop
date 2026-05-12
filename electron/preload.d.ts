@@ -7,6 +7,13 @@ export interface ElectronAPI {
         success: boolean;
         message?: string;
     }>;
+    getSetupCompleted: () => Promise<{
+        success: boolean;
+        completed: boolean;
+    }>;
+    setSetupCompleted: () => Promise<{
+        success: boolean;
+    }>;
     browseFolder: () => Promise<{
         success: boolean;
         path: string;
@@ -241,6 +248,32 @@ export interface ElectronAPI {
     hubOnTrayAction: (callback: (action: string) => void) => void;
     hubOnHotkeySummon: (callback: () => void) => void;
     openInVSCode: (projectPath: string) => Promise<{
+        success: boolean;
+        message?: string;
+    }>;
+    checkLaunchBat: (projectPath: string) => Promise<{
+        success: boolean;
+        exists: boolean;
+    }>;
+    generateLaunchBat: (projectPath: string, projectName?: string) => Promise<{
+        success: boolean;
+        command: string;
+        message?: string;
+    }>;
+    generateAllLaunchBats: (projects: Array<{
+        path: string;
+        name: string;
+    }>) => Promise<{
+        success: boolean;
+        results: Array<{
+            path: string;
+            name: string;
+            success: boolean;
+            command: string;
+            message?: string;
+        }>;
+    }>;
+    launchProject: (projectPath: string) => Promise<{
         success: boolean;
         message?: string;
     }>;
@@ -642,6 +675,22 @@ export interface ElectronAPI {
     }>;
     auditLogClear: () => Promise<{
         success: boolean;
+    }>;
+    tokenStats: () => Promise<{
+        success: boolean;
+        stats: any;
+        error?: string;
+    }>;
+    tokenHistory: (limit?: number) => Promise<{
+        success: boolean;
+        records: any[];
+        error?: string;
+    }>;
+    tokenConversation: (conversationId: string) => Promise<{
+        success: boolean;
+        records: any[];
+        turns: any[];
+        error?: string;
     }>;
     perfSnapshot: () => Promise<{
         success: boolean;

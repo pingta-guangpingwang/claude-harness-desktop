@@ -138,6 +138,21 @@ export default function ProjectSelector() {
           <h1>🐴 {t.selector.title}</h1>
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <a
+            href="https://www.shenlanai.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{
+              fontSize: '11px', color: '#9ca3af', textDecoration: 'none',
+              flexShrink: 0, fontFamily: 'Consolas, monospace',
+              padding: '2px 8px', borderRadius: '3px',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#4f46e5'; e.currentTarget.style.background = '#f5f3ff' }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#9ca3af'; e.currentTarget.style.background = 'transparent' }}
+          >
+            shenlanai.com
+          </a>
           <button
             className="lang-toggle"
             onClick={() => setLocale(locale === 'zh' ? 'en' : 'zh')}

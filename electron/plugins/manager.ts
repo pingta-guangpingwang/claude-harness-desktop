@@ -231,10 +231,13 @@ export class PluginManager {
     this.callbacks.onStatusChange(pluginId, 'disabled')
   }
 
-  /** 卸载插件 */
+  /** 卸载插件（内置插件不可卸载） */
   async uninstall(pluginId: string): Promise<void> {
     const inst = this.instances.get(pluginId)
     if (!inst) throw new Error(`插件 ${pluginId} 未安装`)
+    if (inst.builtin || inst.manifest.builtin) {
+      throw new Error(`系统内置插件 ${pluginId} 不可卸载`)
+    }
 
     try {
       if (inst.mainModule?.onUninstall) {
@@ -252,6 +255,20 @@ export class PluginManager {
     try {
       rmSync(inst.installPath, { recursive: true, force: true })
     } catch { /* 清理文件失败不阻塞 */ }
+  }
+
+  /** 注册系统内置插件（虚拟，无安装目录） */
+  registerBuiltin(manifest: PluginManifest): void {
+    manifest.builtin = true
+    this.registry.register(manifest)
+    this.instances.set(manifest.id, {
+      manifest,
+      installPath: '',
+      status: 'enabled',
+      builtin: true,
+      installedAt: new Date().toISOString(),
+      enabledAt: new Date().toISOString(),
+    })
   }
 
   /** 更新插件 */

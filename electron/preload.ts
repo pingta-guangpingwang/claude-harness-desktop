@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ============ DBHT Root Path ============
   getDBHTRootPath: () => ipcRenderer.invoke('dbghf:get-root-path'),
   setDBHTRootPath: (rootPath: string) => ipcRenderer.invoke('dbghf:set-root-path', rootPath),
+  getSetupCompleted: () => ipcRenderer.invoke('dbghf:get-setup-completed'),
+  setSetupCompleted: () => ipcRenderer.invoke('dbghf:set-setup-completed'),
   browseFolder: () => ipcRenderer.invoke('dbghf:browse-folder'),
   browseIndividualProject: () => ipcRenderer.invoke('dbghf:browse-individual-project'),
   listDBHTProjects: (rootPath: string) => ipcRenderer.invoke('dbghf:list-projects', rootPath),
@@ -265,6 +267,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   auditLogByProject: (projectPath: string, limit?: number) => ipcRenderer.invoke('audit:by-project', projectPath, limit),
   auditLogStats: () => ipcRenderer.invoke('audit:stats'),
   auditLogClear: () => ipcRenderer.invoke('audit:clear'),
+  tokenStats: () => ipcRenderer.invoke('token:stats'),
+  tokenHistory: (limit?: number) => ipcRenderer.invoke('token:history', limit),
+  tokenConversation: (conversationId: string) => ipcRenderer.invoke('token:conversation', conversationId),
   perfSnapshot: () => ipcRenderer.invoke('perf:snapshot'),
   perfHistory: (count?: number) => ipcRenderer.invoke('perf:history', count),
   perfSummary: () => ipcRenderer.invoke('perf:summary'),
@@ -274,6 +279,8 @@ export interface ElectronAPI {
   // DBHT
   getDBHTRootPath: () => Promise<{ success: boolean; rootPath: string }>
   setDBHTRootPath: (rootPath: string) => Promise<{ success: boolean; message?: string }>
+  getSetupCompleted: () => Promise<{ success: boolean; completed: boolean }>
+  setSetupCompleted: () => Promise<{ success: boolean }>
   browseFolder: () => Promise<{ success: boolean; path: string }>
   browseIndividualProject: () => Promise<{ success: boolean; path: string; name?: string }>
   listDBHTProjects: (rootPath: string) => Promise<{ success: boolean; projects: Array<{ path: string; name: string; repoPath: string; status: string; source: string }>; message?: string }>
@@ -455,6 +462,9 @@ export interface ElectronAPI {
   auditLogByProject: (projectPath: string, limit?: number) => Promise<{ success: boolean; entries: any[] }>
   auditLogStats: () => Promise<{ success: boolean; stats: any }>
   auditLogClear: () => Promise<{ success: boolean }>
+  tokenStats: () => Promise<{ success: boolean; stats: any; error?: string }>
+  tokenHistory: (limit?: number) => Promise<{ success: boolean; records: any[]; error?: string }>
+  tokenConversation: (conversationId: string) => Promise<{ success: boolean; records: any[]; turns: any[]; error?: string }>
   perfSnapshot: () => Promise<{ success: boolean; snapshot: any }>
   perfHistory: (count?: number) => Promise<{ success: boolean; snapshots: any[] }>
   perfSummary: () => Promise<{ success: boolean; summary: any }>

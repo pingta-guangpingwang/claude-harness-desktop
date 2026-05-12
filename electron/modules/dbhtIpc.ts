@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow, dialog, shell } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs-extra'
+import { execSync } from 'child_process'
 import { db } from './database.js'
 
 export function registerDbhtIpc(mainWindow: BrowserWindow | null) {
@@ -15,6 +16,22 @@ export function registerDbhtIpc(mainWindow: BrowserWindow | null) {
   ipcMain.handle('dbghf:set-root-path', async (_, rootPath: string) => {
     try {
       await db.setRootPath(rootPath)
+      return { success: true }
+    } catch (error) {
+      return { success: false, message: String(error) }
+    }
+  })
+
+  ipcMain.handle('dbghf:get-setup-completed', async () => {
+    try {
+      const completed = await db.getSetupCompleted()
+      return { success: true, completed }
+    } catch { return { success: true, completed: false } }
+  })
+
+  ipcMain.handle('dbghf:set-setup-completed', async () => {
+    try {
+      await db.setSetupCompleted()
       return { success: true }
     } catch (error) {
       return { success: false, message: String(error) }
@@ -70,8 +87,21 @@ export function registerDbhtIpc(mainWindow: BrowserWindow | null) {
 
   ipcMain.handle('dbghf:open-folder', async (_, folderPath: string) => {
     try {
-      await shell.openPath(folderPath)
-      return { success: true }
-    } catch { return { success: false } }
+      const p = folderPath.replace(/\//g, '\\')
+      if (!fs.existsSync(p)) {
+        return { success: false, message: `路径不存在: ${p}` }
+      }
+      // Windows: 用 explorer.exe 打开（最可靠）；非 Windows 回退 shell.openPath
+      if (process.platform === 'win32') {
+        execSync(`explorer "${p}"`, { timeout: 5000 })
+        return { success: true }
+      }
+      const err = await shell.openPath(p)
+      if (!err) return { success: true }
+      try { execSync(`open "${p}"`, { timeout: 5000 }); return { success: true } } catch { /* ignore */ }
+      return { success: false, message: err }
+    } catch (e: any) {
+      return { success: false, message: e?.message || String(e) }
+    }
   })
 }

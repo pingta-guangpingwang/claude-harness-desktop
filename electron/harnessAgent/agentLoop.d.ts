@@ -11,6 +11,7 @@ export declare class AgentLoop {
     private abortController;
     private pendingPermission;
     private eventCallback;
+    readonly conversationId: string;
     constructor(ctx: AgentContext, pm: PermissionManager, conversationHistory?: ConversationTurn[]);
     abort(): void;
     resolvePermission(decision: 'allow' | 'deny' | 'allow_once'): void;

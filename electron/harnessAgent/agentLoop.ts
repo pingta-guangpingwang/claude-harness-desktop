@@ -5,6 +5,7 @@ import type { AgentContext, AgentEvent, ToolCallRequest } from './types'
 import { executeTool, getToolDeclarations, getTool, getAllTools } from './toolRegistry'
 import { PermissionManager } from './permissionManager'
 import { taskQueue } from './taskQueue.js'
+import { getTokenStore } from '../modules/tokenStore.js'
 
 // ---- DeepSeek API 调用（主进程版本）----
 
@@ -33,6 +34,11 @@ interface DeepSeekStreamChunk {
     }
     finish_reason?: string | null
   }>
+  usage?: {
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+  }
 }
 
 export interface ConversationTurn {
@@ -52,10 +58,12 @@ export class AgentLoop {
     resolve: (decision: 'allow' | 'deny' | 'allow_once') => void
   } | null = null
   private eventCallback: ((event: AgentEvent) => void) | null = null
+  readonly conversationId: string
 
   constructor(ctx: AgentContext, pm: PermissionManager, conversationHistory?: ConversationTurn[]) {
     this.ctx = ctx
     this.permissionManager = pm
+    this.conversationId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 
     // 注入跨轮次对话历史（保留上下文记忆）
     if (conversationHistory && conversationHistory.length > 0) {
@@ -108,6 +116,21 @@ export class AgentLoop {
 
       // 调用 LLM
       const response = await this.callLLMStream(signal, onEvent)
+
+      // 记录 token 消耗
+      if (response.usage) {
+        try {
+          getTokenStore().record({
+            projectPath: 'harness-agent',
+            projectName: '驾驭智能体',
+            model: this.ctx.model,
+            promptTokens: response.usage.prompt_tokens,
+            completionTokens: response.usage.completion_tokens,
+            totalTokens: response.usage.total_tokens,
+            conversationId: this.conversationId,
+          })
+        } catch { /* token 记录失败不阻塞主循环 */ }
+      }
 
       if (signal.aborted) break
 
@@ -263,7 +286,7 @@ export class AgentLoop {
   private async callLLMStream(
     signal: AbortSignal,
     onEvent: (event: AgentEvent) => void,
-  ): Promise<{ choices?: Array<{ message?: { content?: string; reasoning_content?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> } }> }> {
+  ): Promise<{ choices?: Array<{ message?: { content?: string; reasoning_content?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> } }>; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }> {
     // 使用 OpenAI 兼容格式（支持 tool calling）
     const tools = getToolDeclarations()
 
@@ -355,6 +378,7 @@ export class AgentLoop {
 
     // 用于累积流式 tool calls
     const tcAcc: Map<number, { id: string; name: string; args: string }> = new Map()
+    let streamUsage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null = null
 
     while (true) {
       const { done, value } = await reader.read()
@@ -372,6 +396,10 @@ export class AgentLoop {
         try {
           const chunk: DeepSeekStreamChunk = JSON.parse(data)
           const delta = chunk.choices?.[0]?.delta
+          // 捕获 usage（通常出现在最后一个 chunk）
+          if (chunk.usage) {
+            streamUsage = chunk.usage
+          }
           if (!delta) continue
 
           // 文本内容
@@ -409,7 +437,7 @@ export class AgentLoop {
       }
     }
 
-    return result
+    return { choices: result.choices, usage: streamUsage || undefined }
   }
 
   private extractToolCalls(response: {

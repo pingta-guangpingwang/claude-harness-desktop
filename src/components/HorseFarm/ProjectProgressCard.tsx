@@ -69,9 +69,8 @@ export default function ProjectProgressCard({
 
   // Notes
   const [hasLaunchBat, setHasLaunchBat] = useState(false)
-  const [showQuickTask, setShowQuickTask] = useState(false)
-  const [quickTaskText, setQuickTaskText] = useState('')
-  const [quickTaskSending, setQuickTaskSending] = useState(false)
+  const [launching, setLaunching] = useState(false)
+  const [tipModal, setTipModal] = useState<string | null>(null)
   const [notes, setNotes] = useState('')
   const [showNotesEditor, setShowNotesEditor] = useState(false)
   const [notesDraft, setNotesDraft] = useState('')
@@ -82,11 +81,19 @@ export default function ProjectProgressCard({
     }).catch(() => {})
   }, [hfProject.projectPath])
 
-  useEffect(() => {
+  // 检查启动脚本 + 监听生成事件（驾驭智能体 generateLaunchScriptsTool 写完后刷新）
+  const checkBat = useCallback(() => {
     window.electronAPI.checkLaunchBat(hfProject.projectPath).then(r => {
-      if (r.success) setHasLaunchBat(r.exists)
-    }).catch(() => {})
+      setHasLaunchBat(r.success && r.exists)
+    }).catch(() => setHasLaunchBat(false))
   }, [hfProject.projectPath])
+
+  useEffect(() => {
+    checkBat()
+    // 每隔 3 秒轮询一次（驾驭智能体生成 bat 后按钮自动变亮）
+    const interval = setInterval(checkBat, 3000)
+    return () => clearInterval(interval)
+  }, [checkBat])
 
   const openNotesEditor = useCallback(() => {
     setNotesDraft(notes)
@@ -221,7 +228,17 @@ export default function ProjectProgressCard({
         )}
 
         <div className="hf-card-actions">
-          <button onClick={onOpen}>{t.horseFarm.openProject}</button>
+          <button onClick={async (e) => {
+            e.stopPropagation()
+            try {
+              const result = await window.electronAPI.openFolder(hfProject.projectPath)
+              if (!result.success) {
+                addSystemMessage(`打开文件夹失败: ${(result as any).message || '未知错误'}`, 'error')
+              }
+            } catch (err) {
+              addSystemMessage(`打开文件夹异常: ${String(err)}`, 'error')
+            }
+          }}>{t.horseFarm.openProject}</button>
           <button
             className="primary"
             onClick={(e) => { e.stopPropagation(); onLaunchChat() }}
@@ -231,37 +248,35 @@ export default function ProjectProgressCard({
           </button>
           {/* 一键启动按钮 */}
           <button
-            onClick={(e) => {
-              e.stopPropagation()
-              if (hasLaunchBat) {
-                window.electronAPI.launchProject(hfProject.projectPath).catch(() => {})
-              } else {
-                addSystemMessage(t.horseFarm.launchBatNoScript, 'status')
-              }
-            }}
-            title={hasLaunchBat ? t.horseFarm.launchBatGenerated : t.horseFarm.launchBatNoScript}
-            style={{
-              padding: '4px 8px', borderRadius: '4px', border: hasLaunchBat ? '1px solid #f59e0b' : '1px solid #d1d5db',
-              background: hasLaunchBat ? '#fef3c7' : '#f3f4f6',
-              color: hasLaunchBat ? '#92400e' : '#9ca3af',
-              cursor: 'pointer', fontSize: '12px', fontWeight: hasLaunchBat ? 600 : 400,
-              transition: 'all 0.15s',
-            }}
-          >🚀</button>
-          {/* 项目 AI 快速任务按钮 */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              setQuickTaskText('')
-              setShowQuickTask(true)
-            }}
-            title="向项目 AI 快速派发任务"
-            style={{
-              padding: '4px 8px', borderRadius: '4px', border: '1px solid #8b5cf6',
-              background: '#f5f3ff', color: '#7c3aed',
-              cursor: 'pointer', fontSize: '12px', fontWeight: 600,
-            }}
-          >🤖</button>
+              onClick={async (e) => {
+                e.stopPropagation()
+                if (launching) return
+                if (!hasLaunchBat) {
+                  setTipModal(t.horseFarm.launchBatNoScript)
+                  return
+                }
+                setLaunching(true)
+                try {
+                  const res = await window.electronAPI.launchProject(hfProject.projectPath)
+                  if (!res.success) {
+                    addSystemMessage(`启动失败: ${res.message || '未知错误'}`, 'error')
+                  }
+                } catch (err) {
+                  addSystemMessage(`启动异常: ${String(err)}`, 'error')
+                } finally {
+                  setLaunching(false)
+                }
+              }}
+              title={launching ? '启动中...' : hasLaunchBat ? t.horseFarm.launchBatGenerated : t.horseFarm.launchBatNoScript}
+              style={{
+                padding: '4px 8px', borderRadius: '4px', border: hasLaunchBat ? '1px solid #f59e0b' : '1px solid #d1d5db',
+                background: hasLaunchBat ? '#fef3c7' : '#e5e7eb',
+                cursor: 'pointer', fontSize: '20px',
+                transition: 'all 0.2s', lineHeight: 1,
+                filter: hasLaunchBat ? 'none' : 'grayscale(100%)',
+                opacity: launching ? 0.5 : (hasLaunchBat ? 1 : 0.25),
+              }}
+            >{launching ? '⏳' : '🚀'}</button>
           {hfProject.phase === 'idle' || hfProject.phase === 'requirements' ? (
             <button className="primary" onClick={(e) => { e.stopPropagation(); setShowWorkflow(true) }}>
               {t.horseFarm.workflowTitle}
@@ -319,78 +334,6 @@ export default function ProjectProgressCard({
           />
         )}
       </div>
-
-      {/* Quick Task Dialog — 项目 AI 交互 */}
-      {showQuickTask && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 1002,
-          background: 'rgba(0,0,0,0.35)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }} onClick={() => setShowQuickTask(false)}>
-          <div style={{
-            background: '#fff', borderRadius: '12px', padding: '20px',
-            width: '480px', maxWidth: '94vw',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
-            display: 'flex', flexDirection: 'column',
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <h4 style={{ margin: 0, fontSize: '14px', color: '#1f2937' }}>
-                🤖 {t.horseFarm.quickTaskTitle} — {hfProject.projectName}
-              </h4>
-              <button onClick={() => setShowQuickTask(false)} style={{
-                border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '18px', color: '#9ca3af',
-              }}>✕</button>
-            </div>
-            <textarea
-              value={quickTaskText}
-              onChange={e => setQuickTaskText(e.target.value)}
-              placeholder={t.horseFarm.quickTaskPlaceholder}
-              autoFocus
-              style={{
-                flex: 1, minHeight: '100px', padding: '12px',
-                border: '1px solid #d1d5db', borderRadius: '8px',
-                fontSize: '13px', lineHeight: 1.6, resize: 'vertical',
-                outline: 'none', fontFamily: 'inherit',
-              }}
-              onKeyDown={async e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  const task = quickTaskText.trim()
-                  if (!task || quickTaskSending) return
-                  setQuickTaskSending(true)
-                  try {
-                    // 确保 PTY 在线
-                    const status = await window.electronAPI.ptyGetStatus(hfProject.projectPath)
-                    if (!status.connected) {
-                      const spawnRes = await window.electronAPI.ptySpawn(hfProject.projectPath)
-                      if (!spawnRes.success) {
-                        addSystemMessage(t.horseFarm.quickTaskTerminalFailed.replace('{err}', spawnRes.message || ''), 'error')
-                        setQuickTaskSending(false)
-                        return
-                      }
-                      // 等待 Claude Code 初始化
-                      await new Promise(r => setTimeout(r, 5000))
-                    }
-                    // 发送任务到项目 PTY
-                    await window.electronAPI.ptyWrite(hfProject.projectPath, task + '\r')
-                    addSystemMessage(t.horseFarm.quickTaskSent.replace('{task}', task.slice(0, 100)), 'command')
-                    setShowQuickTask(false)
-                    // 自动打开 Chat 面板查看回复
-                    onLaunchChat()
-                  } catch (err) {
-                    addSystemMessage(t.horseFarm.quickTaskSendFailed.replace('{err}', String(err)), 'error')
-                  } finally {
-                    setQuickTaskSending(false)
-                  }
-                }
-              }}
-            />
-            <p style={{ fontSize: '10px', color: '#9ca3af', margin: '6px 0 0' }}>
-              {t.horseFarm.quickTaskHint}
-            </p>
-          </div>
-        </div>
-      )}
 
       {showWorkflow && (
         <PreProjectWorkflow
@@ -462,6 +405,38 @@ export default function ProjectProgressCard({
                 {t.horseFarm.notesSave}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 通用提示弹窗 — 居中大弹窗，手动关闭 */}
+      {tipModal && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10000,
+          background: 'rgba(0,0,0,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          animation: 'hf-fadeIn 0.2s ease',
+        }} onClick={() => setTipModal(null)}>
+          <div style={{
+            background: '#fff', borderRadius: '16px', padding: '32px 36px',
+            maxWidth: '520px', width: '90%',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+            textAlign: 'center',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>🚀</div>
+            <p style={{
+              margin: '0 0 24px', fontSize: '16px', lineHeight: 1.8, color: '#374151',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            }}>
+              {tipModal}
+            </p>
+            <button onClick={() => setTipModal(null)} style={{
+              padding: '10px 32px', borderRadius: '8px', border: 'none',
+              background: '#4f46e5', color: '#fff',
+              cursor: 'pointer', fontSize: '14px', fontWeight: 600,
+            }}>
+              我知道了
+            </button>
           </div>
         </div>
       )}

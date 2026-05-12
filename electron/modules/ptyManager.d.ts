@@ -18,7 +18,8 @@ interface PtySession {
 }
 /** 获取会话表（供 harnessAgent 工具直接调用） */
 export declare function getSessions(): Map<string, PtySession>;
-/** 直接 spawn PTY（供 harnessAgent 工具调用，不走 IPC） */
+/** 直接 spawn PTY（供 harnessAgent 工具调用，不走 IPC）。
+ *  始终走 cmd.exe /c，追加 --fork-session 避免与 VSCode 冲突，失败时自动重试。 */
 export declare function spawnPtySession(projectPath: string, command?: string, args?: string[]): Promise<{
     success: boolean;
     pid?: number;

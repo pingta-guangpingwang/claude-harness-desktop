@@ -54,7 +54,13 @@ function App() {
           dispatch({ type: 'SET_CURRENT_VIEW', payload: 'selector' })
         }
       } else {
-        dispatch({ type: 'SET_CURRENT_VIEW', payload: 'setup' })
+        // 检查是否已跳过设置
+        const setupResult = await window.electronAPI.getSetupCompleted()
+        if (setupResult.success && setupResult.completed) {
+          dispatch({ type: 'SET_CURRENT_VIEW', payload: 'selector' })
+        } else {
+          dispatch({ type: 'SET_CURRENT_VIEW', payload: 'setup' })
+        }
       }
     }
     init()
@@ -89,6 +95,22 @@ function App() {
           <h1>🐴 {t.horseFarm.tabLabel}</h1>
         </div>
         <div className="hf-header-right">
+          <a
+            href="https://www.shenlanai.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{
+              fontSize: '11px', color: '#9ca3af', textDecoration: 'none',
+              marginRight: '8px', flexShrink: 0,
+              fontFamily: 'Consolas, monospace',
+              padding: '2px 8px', borderRadius: '3px',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#4f46e5'; e.currentTarget.style.background = '#f5f3ff' }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#9ca3af'; e.currentTarget.style.background = 'transparent' }}
+          >
+            shenlanai.com
+          </a>
           <button
             onClick={() => dispatch({ type: 'SET_HORSE_FARM_SUB_TAB', payload: 'settings' })}
             style={{

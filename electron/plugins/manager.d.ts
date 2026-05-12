@@ -23,8 +23,10 @@ export declare class PluginManager {
     private enablePluginInternal;
     /** 禁用插件 */
     disable(pluginId: string): Promise<void>;
-    /** 卸载插件 */
+    /** 卸载插件（内置插件不可卸载） */
     uninstall(pluginId: string): Promise<void>;
+    /** 注册系统内置插件（虚拟，无安装目录） */
+    registerBuiltin(manifest: PluginManifest): void;
     /** 更新插件 */
     update(pluginId: string, newManifest: PluginManifest, newPath: string): Promise<void>;
     getInstance(pluginId: string): PluginInstance | undefined;

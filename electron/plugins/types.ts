@@ -52,6 +52,8 @@ export interface PluginManifest {
   permissions?: PluginPermission[]
   /** 配置项 JSON Schema */
   config?: Record<string, unknown>
+  /** 是否为系统内置插件（不可卸载） */
+  builtin?: boolean
 }
 
 /** 插件运行时实例 */
@@ -63,6 +65,8 @@ export interface PluginInstance {
   status: 'installed' | 'enabled' | 'disabled' | 'error'
   /** 主进程模块导出 */
   mainModule?: PluginMainModule
+  /** 是否为系统内置 */
+  builtin?: boolean
   /** 错误信息 */
   error?: string
   /** 安装时间 */

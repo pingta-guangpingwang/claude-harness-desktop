@@ -2,6 +2,8 @@ export interface ElectronAPI {
   // DBHT
   getDBHTRootPath: () => Promise<{ success: boolean; rootPath: string }>
   setDBHTRootPath: (rootPath: string) => Promise<{ success: boolean; message?: string }>
+  getSetupCompleted: () => Promise<{ success: boolean; completed: boolean }>
+  setSetupCompleted: () => Promise<{ success: boolean }>
   browseFolder: () => Promise<{ success: boolean; path: string }>
   browseIndividualProject: () => Promise<{ success: boolean; path: string; name?: string }>
   listDBHTProjects: (rootPath: string) => Promise<{ success: boolean; projects: Array<{ path: string; name: string; repoPath: string; status: string; source: string }>; message?: string }>
@@ -183,6 +185,9 @@ export interface ElectronAPI {
   auditLogByProject: (projectPath: string, limit?: number) => Promise<{ success: boolean; entries: any[] }>
   auditLogStats: () => Promise<{ success: boolean; stats: any }>
   auditLogClear: () => Promise<{ success: boolean }>
+  tokenStats: () => Promise<{ success: boolean; stats: any; error?: string }>
+  tokenHistory: (limit?: number) => Promise<{ success: boolean; records: any[]; error?: string }>
+  tokenConversation: (conversationId: string) => Promise<{ success: boolean; records: any[]; turns: any[]; error?: string }>
   perfSnapshot: () => Promise<{ success: boolean; snapshot: any }>
   perfHistory: (count?: number) => Promise<{ success: boolean; snapshots: any[] }>
   perfSummary: () => Promise<{ success: boolean; summary: any }>

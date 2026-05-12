@@ -23,6 +23,7 @@ import { WorkflowEditor } from '../Workflow/WorkflowEditor'
 import { WorkflowTemplates } from '../Workflow/WorkflowTemplates'
 import { ResourceHub } from '../Eco/ResourceHub'
 import { ConfigMigrator } from '../Eco/ConfigMigrator'
+import { TokenStatsPanel } from '../System/TokenStatsPanel'
 import { RuleEditor } from '../System/RuleEditor'
 import { AuditLogViewer } from '../System/AuditLogViewer'
 import { PerformanceDashboard } from '../System/PerformanceDashboard'
@@ -50,7 +51,7 @@ export default function HorseFarm() {
     settings: { ...DEFAULT_API_CONFIG },
   })
   const [detailPanel, setDetailPanel] = useState<{
-    type: 'mindmap' | 'kb' | 'initLog' | 'chat' | 'audit' | 'harness' | 'cli' | 'plugins' | 'identity' | 'efficiency' | 'workflow' | 'eco' | 'system' | null
+    type: 'mindmap' | 'kb' | 'initLog' | 'chat' | 'audit' | 'harness' | 'cli' | 'plugins' | 'identity' | 'efficiency' | 'workflow' | 'eco' | 'system' | 'token' | null
     projectPath: string | null
     ecoSubTab?: 'resources' | 'migrator'
     systemSubTab?: 'rules' | 'audit' | 'perf'
@@ -339,6 +340,13 @@ export default function HorseFarm() {
               color: detailPanel.type === 'eco' ? '#06b6d4' : '#888',
               cursor: 'pointer', fontSize: '12px',
             }}>Eco</button>
+          <button onClick={() => setDetailPanel(prev => prev.type === 'token' ? { type: null, projectPath: null } : { type: 'token', projectPath: null })}
+            style={{
+              padding: '4px 10px', borderRadius: '6px', border: '1px solid #444',
+              background: detailPanel.type === 'token' ? '#f59e0b22' : 'transparent',
+              color: detailPanel.type === 'token' ? '#f59e0b' : '#888',
+              cursor: 'pointer', fontSize: '12px',
+            }}>📊 Tokens</button>
           <button onClick={() => setDetailPanel(prev => prev.type === 'system' ? { type: null, projectPath: null } : { type: 'system', projectPath: null, systemSubTab: 'rules' })}
             style={{
               padding: '4px 10px', borderRadius: '6px', border: '1px solid #444',
@@ -467,6 +475,7 @@ export default function HorseFarm() {
             {detailPanel.type === 'system' && (
               <SystemPanel subTab={detailPanel.systemSubTab || 'rules'} onTabChange={tab => setDetailPanel(prev => ({ ...prev, systemSubTab: tab }))} />
             )}
+            {detailPanel.type === 'token' && <TokenStatsPanel />}
             {detailPanel.type === 'initLog' && detailPanel.projectPath && initProgress[detailPanel.projectPath] && (
               <div className="hf-init-log-viewer">
                 <h4 style={{ margin: '0 0 12px', fontSize: '14px', color: '#1f2937' }}>
@@ -679,7 +688,9 @@ function SystemPanel({ subTab, onTabChange }: { subTab: 'rules' | 'audit' | 'per
         }}>{t.system.performance}</button>
       </div>
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {subTab === 'rules' ? <RuleEditor /> : subTab === 'audit' ? <AuditLogViewer /> : <PerformanceDashboard />}
+        <div style={{ display: subTab === 'rules' ? undefined : 'none' }}><RuleEditor /></div>
+        <div style={{ display: subTab === 'audit' ? undefined : 'none' }}><AuditLogViewer /></div>
+        <div style={{ display: subTab === 'perf' ? undefined : 'none' }}><PerformanceDashboard /></div>
       </div>
     </div>
   )

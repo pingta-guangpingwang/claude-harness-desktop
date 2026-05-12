@@ -1,7 +1,7 @@
 # Claude Harness Desktop — 技术文档
 
-> **最后更新**: 2026-05-11  
-> **当前 DBHT 版本**: `20260511T230953727`  
+> **最后更新**: 2026-05-12  
+> **当前 DBHT 版本**: `20260512T000000000`  
 > **项目定位**: AI 驱动的多项目并行开发管理工具（Electron 28 + React 19 + TypeScript + Vite 8）
 
 ---
@@ -70,7 +70,7 @@
 │                                                         │
 │  electron/harnessAgent/     驾驭智能体核心                │
 │  ├── agentLoop.ts           对话循环 (DeepSeek LLM)       │
-│  ├── tools.ts               13 个内置工具                 │
+│  ├── tools.ts               15 个内置工具                 │
 │  ├── toolRegistry.ts        工具注册表 (buildTool 工厂)   │
 │  └── permissionManager.ts   运行时权限决策                │
 │                                                         │
@@ -172,6 +172,11 @@
 | AI 感知 | ✅ | `agentLoop.ts` system prompt 动态注入插件工具列表 |
 | 安装后交互 | ✅ | 展开查看命令/工具 + 一键运行 |
 | ZIP/URL 安装 | ✅ | `installer.ts` — 传统 zip 安装兼容 |
+| 共享插件目录 | ✅ | `catalog.ts` — 13 款精选插件 + searchCatalog/findPlugin |
+| AI 自主安装 | ✅ | `install_plugin` 工具 — 驾驭智能体可搜索安装插件 |
+| 安装后审查 | ✅ | smoke test — 自动验证 binary + 功能自检 |
+| 系统内置插件 | ✅ | `registerBuiltin()` — 6 个系统插件（不可卸载/始终启用） |
+| 内置保护 | ✅ | 内置插件 uninstall 拦截 + UI 隐藏卸载按钮 |
 
 ### Phase 4: 角色 & 效率 ✅ 完成
 | 功能 | 状态 | 实现 |
@@ -207,7 +212,7 @@
 
 ## 4. 驾驭智能体 (Harness Agent)
 
-### 内置工具 (13 个)
+### 内置工具 (15 个)
 | 工具 | 用途 |
 |------|------|
 | `wake_projects` | 启动项目 PTY 终端 |
@@ -222,6 +227,9 @@
 | `read_file` | 读取文件内容 |
 | `write_file` | 写入文件 |
 | `shell_exec` | 执行 shell 命令 |
+| `generate_launch_scripts` | 为所有项目生成一键启动脚本 |
+| `list_available_plugins` | 浏览插件商店目录 |
+| `install_plugin` | 从插件商店自主安装插件 |
 
 ### 插件工具（动态，安装后自动注册）
 - `format_with_prettier` / `lint_with_eslint` / `typecheck_tsc` / `check_outdated_deps`
@@ -279,6 +287,7 @@ dbht commit . --ai claude-code  # DBHT 提交
 
 | 日期 | 内容 |
 |------|------|
+| 2026-05-12 | **插件生态完善**: 共享目录 catalog.ts + AI 自主安装 + smoke test 审查 + 6 个系统内置插件 + 一键启动脚本 + 居中提示弹窗模式 |
 | 2026-05-11 | **插件商店 v2**: 真实 npm/pip 安装 + 下载进度 + registerShim + AI 工具注册 + agentLoop 系统提示注入 |
 | 2026-05-11 | 修复端口漂移白屏: `VITE_DEV_PORT` 环境变量统一 + `strictPort: true` |
 | 2026-05-10 | 驾驭智能体 4 个 bug 修复: broadcast 并行化 + memoryPressure 结构化压缩 + idle timer 排序 |

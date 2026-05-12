@@ -380,7 +380,10 @@ interface PluginSummary {
   version: string
   description: string
   author: string
+  icon?: string
   status: string
+  builtin?: boolean
+  provides?: Array<{ type: string; id: string; description: string; commandTemplate?: string }>
   error?: string
   installedAt: string
   enabledAt?: string
@@ -743,7 +746,7 @@ export const PluginStore: React.FC = () => {
                     }}>
                       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
                         <span style={{ fontSize: 26, flexShrink: 0, cursor: 'pointer' }} onClick={() => setExpandedId(isExpanded ? null : plugin.id)}>
-                          {catPlugin?.icon || '📦'}
+                          {catPlugin?.icon || plugin.icon || '📦'}
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 2 }}>
@@ -751,6 +754,12 @@ export const PluginStore: React.FC = () => {
                               {plugin.name}
                             </span>
                             <span style={{ color: '#6b7280', fontSize: 11 }}>v{plugin.version}</span>
+                            {plugin.builtin && (
+                              <span style={{
+                                padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 600,
+                                background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)',
+                              }}>系统内置</span>
+                            )}
                             <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor(plugin.status), display: 'inline-block' }} />
                             <span style={{ color: statusColor(plugin.status), fontSize: 11, fontWeight: 600, textTransform: 'uppercase' }}>{plugin.status}</span>
                           </div>
@@ -760,12 +769,12 @@ export const PluginStore: React.FC = () => {
                           {plugin.error && <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>{plugin.error}</div>}
 
                           {/* 展开详情：命令列表 + 工具列表 */}
-                          {isExpanded && catPlugin && (
+                          {isExpanded && (catPlugin?.provides || plugin.provides) && (
                             <div style={{ marginTop: 8, padding: 10, background: '#0f0f23', borderRadius: 8, border: '1px solid #1e1e3a' }}>
                               <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8, fontWeight: 600 }}>
                                 {t.harnessAgent.quickCommandsHint || '已注册的能力:'}
                               </div>
-                              {catPlugin.provides.map(p => (
+                              {(catPlugin?.provides || plugin.provides || []).map(p => (
                                 <div key={p.id} style={{
                                   display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0',
                                   borderBottom: '1px solid #1a1a2e', fontSize: 11,
@@ -782,29 +791,17 @@ export const PluginStore: React.FC = () => {
                                   <span style={{ color: '#6b7280', flex: 2, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {p.description}
                                   </span>
-                                  {p.commandTemplate && (
+                                  {(p as any).commandTemplate && (
                                     <code style={{
                                       padding: '1px 6px', borderRadius: 3, fontSize: 10,
                                       background: '#1e1e3a', color: '#a78bfa', flexShrink: 0,
                                       maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                                     }}>
-                                      {p.commandTemplate}
+                                      {(p as any).commandTemplate}
                                     </code>
                                   )}
                                 </div>
                               ))}
-                              <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                {catPlugin.provides.filter(p => p.type === 'command').slice(0, 3).map(p => (
-                                  <button key={p.id}
-                                    onClick={() => handleRunCommand(plugin.id, p.id, p.commandTemplate || '')}
-                                    style={{
-                                      padding: '3px 10px', borderRadius: 4, border: '1px solid #333', background: '#16162a',
-                                      color: '#7dd3fc', cursor: 'pointer', fontSize: 10,
-                                    }}>
-                                    ▶ {p.id}
-                                  </button>
-                                ))}
-                              </div>
                             </div>
                           )}
                         </div>
@@ -812,18 +809,22 @@ export const PluginStore: React.FC = () => {
                           <button onClick={() => setExpandedId(isExpanded ? null : plugin.id)} style={{
                             background: 'transparent', color: '#6b7280', border: 'none', cursor: 'pointer', fontSize: 16, padding: 0,
                           }}>{isExpanded ? '▲' : '▼'}</button>
-                          {plugin.status === 'enabled' ? (
-                            <button onClick={() => handleDisable(plugin.id)} style={{ background: '#1f2937', color: '#d1d5db', border: '1px solid #374151', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontSize: 11 }}>
-                              {t.plugins.disable}
-                            </button>
-                          ) : (
-                            <button onClick={() => handleEnable(plugin.id)} style={{ background: '#064e3b', color: '#34d399', border: '1px solid #065f46', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontSize: 11 }}>
-                              {t.plugins.enable}
-                            </button>
+                          {!plugin.builtin && (
+                            <>
+                              {plugin.status === 'enabled' ? (
+                                <button onClick={() => handleDisable(plugin.id)} style={{ background: '#1f2937', color: '#d1d5db', border: '1px solid #374151', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontSize: 11 }}>
+                                  {t.plugins.disable}
+                                </button>
+                              ) : (
+                                <button onClick={() => handleEnable(plugin.id)} style={{ background: '#064e3b', color: '#34d399', border: '1px solid #065f46', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontSize: 11 }}>
+                                  {t.plugins.enable}
+                                </button>
+                              )}
+                              <button onClick={() => handleUninstall(plugin.id)} style={{ background: '#450a0a', color: '#fca5a5', border: '1px solid #7f1d1d', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontSize: 11 }}>
+                                {t.plugins.uninstall}
+                              </button>
+                            </>
                           )}
-                          <button onClick={() => handleUninstall(plugin.id)} style={{ background: '#450a0a', color: '#fca5a5', border: '1px solid #7f1d1d', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontSize: 11 }}>
-                            {t.plugins.uninstall}
-                          </button>
                         </div>
                       </div>
                     </div>

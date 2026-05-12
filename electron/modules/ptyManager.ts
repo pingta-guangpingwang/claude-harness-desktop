@@ -41,7 +41,8 @@ export function getSessions(): Map<string, PtySession> {
   return sessions
 }
 
-/** 直接 spawn PTY（供 harnessAgent 工具调用，不走 IPC） */
+/** 直接 spawn PTY（供 harnessAgent 工具调用，不走 IPC）。
+ *  始终走 cmd.exe /c，追加 --fork-session 避免与 VSCode 冲突，失败时自动重试。 */
 export async function spawnPtySession(projectPath: string, command?: string, args?: string[]): Promise<{ success: boolean; pid?: number; sessionId?: string; message?: string }> {
   const key = normPath(projectPath)
   const existing = sessions.get(key)
@@ -52,10 +53,27 @@ export async function spawnPtySession(projectPath: string, command?: string, arg
   }
   const rawCmd = command || resolveClaudePath()
   const rawArgs = args || []
-  const { file, args: finalArgs } = wrapCommand(rawCmd, rawArgs)
+  // 自动追加 --fork-session，确保 Claude Code 不与 VSCode 扩展冲突
+  const isClaude = rawCmd.toLowerCase().includes('claude')
+  const finalRawArgs = isClaude && !rawArgs.includes('--fork-session')
+    ? ['--fork-session', ...rawArgs]
+    : rawArgs
+  const { file, args: finalArgs } = wrapCommand(rawCmd, finalRawArgs)
   console.log('[PTY] 启动命令:', file, '参数:', finalArgs, '工作目录:', key)
+
+  // 预检：快速验证二进制可运行（仅对 claude 路径）
+  if (isClaude && !fs.existsSync(rawCmd) && !rawCmd.endsWith('.cmd') && !rawCmd.endsWith('.bat')) {
+    console.error('[PTY] 二进制不存在:', rawCmd)
+    return { success: false, message: `Claude Code 未找到: ${rawCmd}` }
+  }
+
+  return await spawnWithRetry(file, finalArgs, key, 0)
+}
+
+/** 带重试的 spawn：首次失败等 2s 重试，第二次失败等 5s 最后尝试 */
+async function spawnWithRetry(file: string, args: string[], key: string, attempt: number): Promise<{ success: boolean; pid?: number; sessionId?: string; message?: string }> {
   try {
-    const newPty = pty.spawn(file, finalArgs, {
+    const newPty = pty.spawn(file, args, {
       cwd: key,
       env: { ...process.env, TERM: 'xterm-256color', FORCE_COLOR: '1', COLORTERM: 'truecolor' },
       cols: 120, rows: 40,
@@ -63,26 +81,59 @@ export async function spawnPtySession(projectPath: string, command?: string, arg
     const sessionId = createSessionId()
     const session: PtySession = { pty: newPty, sessionId, projectPath: key, lastDataAt: Date.now() }
     sessions.set(key, session)
-    console.log('[PTY] PID:', newPty.pid, '会话:', sessionId, '项目:', key)
+    console.log('[PTY] PID:', newPty.pid, '会话:', sessionId, '项目:', key, attempt > 0 ? `(重试#${attempt})` : '')
+
+    // 快速失败检测：进程在 2.5s 内退出 → 重试
+    let resolved = false
+    let exitTimer: ReturnType<typeof setTimeout> | null = null
+
     newPty.onData((data: string) => {
       session.lastDataAt = Date.now()
       sendToRenderer('pty:data', key, data)
       feedCollector(key, data)
     })
+
     newPty.onExit(({ exitCode }: { exitCode: number }) => {
       console.log('[PTY] 进程退出, 退出码:', exitCode, 'proj:', key.slice(-30))
-      sendToRenderer('pty:exit', key, exitCode)
-      sessions.delete(key)
-    })
-    // 通知渲染进程：PTY 已启动（供 ChatContext 自动创建会话状态）
-    sendToRenderer('pty:spawned', key, sessionId, newPty.pid)
-    // 自动应答 Claude Code 信任确认 (y=Yes)
-    setTimeout(() => {
-      if (sessions.get(key)) {
-        newPty.write('y\r')
-        console.log('[PTY] 自动发送信任确认: y\\r →', key.slice(-30))
+      if (exitTimer) clearTimeout(exitTimer)
+
+      if (!resolved && attempt < 2) {
+        // 快速失败 → 重试
+        const delay = attempt === 0 ? 2000 : 5000
+        console.log(`[PTY] ${delay}ms 后重试 (attempt ${attempt + 1})`)
+        resolved = true
+        sessions.delete(key)
+        setTimeout(async () => {
+          const result = await spawnWithRetry(file, args, key, attempt + 1)
+          if (result.success) {
+            sendToRenderer('pty:spawned', key, result.sessionId!, result.pid!)
+          } else {
+            sendToRenderer('pty:exit', key, exitCode)
+          }
+        }, delay)
+      } else {
+        resolved = true
+        sessions.delete(key)
+        sendToRenderer('pty:exit', key, exitCode)
       }
-    }, 3000)
+    })
+
+    // 3s 后未退出 → 启动成功
+    exitTimer = setTimeout(() => {
+      exitTimer = null
+      if (!resolved) {
+        resolved = true
+        sendToRenderer('pty:spawned', key, sessionId, newPty.pid)
+        // 自动应答 Claude Code 信任确认 (y=Yes)
+        setTimeout(() => {
+          if (sessions.get(key)) {
+            newPty.write('y\r')
+            console.log('[PTY] 自动发送信任确认: y\\r →', key.slice(-30))
+          }
+        }, 3000)
+      }
+    }, 2500)
+
     return { success: true, pid: newPty.pid, sessionId }
   } catch (err) {
     console.error('[PTY] 启动失败:', err)
@@ -291,17 +342,17 @@ function createSessionId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 }
 
-/** 查找 claude 命令的完整路径（优先找 .exe，node-pty 不能直接运行 .cmd 批处理） */
+/** 查找 claude 命令的完整路径。统一通过 cmd.exe /c 启动，避免 node-pty ConPTY 直接 spawn .exe 时的路径解析问题（尤其在 VSCode 占用项目时） */
 function resolveClaudePath(): string {
   const npmPrefix = process.env.APPDATA
     ? path.join(process.env.APPDATA, 'npm')
     : path.join(process.env.HOME || 'C:\\Users\\admin', 'AppData', 'Roaming', 'npm')
 
-  // 优先: claude.exe 本体 (node-pty 可直接运行)
+  // claude.exe 本体
   const claudeExe = path.join(npmPrefix, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')
   if (fs.existsSync(claudeExe)) return claudeExe
 
-  // 回退: claude.cmd 批处理包装器 (需通过 cmd.exe /c 运行)
+  // 回退: claude.cmd 批处理包装器
   const claudeCmd = path.join(npmPrefix, 'claude.cmd')
   if (fs.existsSync(claudeCmd)) return claudeCmd
 
@@ -311,12 +362,13 @@ function resolveClaudePath(): string {
   return 'claude'
 }
 
-/** 如果命令是 .cmd 批处理，用 cmd.exe /c 包装 */
+/** 统一通过 cmd.exe /c 启动，确保路径解析可靠，并自动追加 --fork-session 避免与 VSCode 扩展冲突 */
 function wrapCommand(cmd: string, args: string[]): { file: string; args: string[] } {
-  if (cmd.endsWith('.cmd') || cmd.endsWith('.bat')) {
-    return { file: 'cmd.exe', args: ['/c', cmd, ...args] }
-  }
-  return { file: cmd, args }
+  // 始终用 cmd.exe /c 包装 — Windows ConPTY 直接 spawn .exe 有时解析失败
+  // 追加 --fork-session 让 Claude Code 使用独立 session，不检测已有会话
+  const resolvedCmd = cmd.endsWith('.cmd') || cmd.endsWith('.bat') ? cmd : cmd
+  const allArgs = [resolvedCmd, ...args]
+  return { file: 'cmd.exe', args: ['/c', ...allArgs] }
 }
 
 function sendToRenderer(channel: string, projectPath: string, ...args: unknown[]) {
