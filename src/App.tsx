@@ -66,6 +66,25 @@ function App() {
     init()
   }, [dispatch])
 
+  // 监听 create_project 推送的新项目事件 → 即时刷新项目列表和农场
+  useEffect(() => {
+    const unsub = window.electronAPI.onProjectAdded((projectPath: string, projectName: string) => {
+      console.log('[App] 收到新项目通知:', projectName, projectPath)
+      // 1. 添加到项目列表
+      const newProject: Project = {
+        name: projectName,
+        path: projectPath,
+        repoPath: '',
+        source: 'individual',
+        status: 'synced',
+      }
+      dispatch({ type: 'ADD_PROJECT', payload: newProject })
+      // 2. 添加到 Harness Farm
+      dispatch({ type: 'ADD_TO_HORSE_FARM', payload: [projectPath] })
+    })
+    return unsub
+  }, [dispatch])
+
   if (isFloating) {
     return <FloatingWidget />
   }

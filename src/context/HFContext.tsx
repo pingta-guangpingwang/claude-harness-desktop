@@ -23,6 +23,7 @@ export type HFAction =
   | { type: 'SET_ROOT_REPO_PATH'; payload: string }
   | { type: 'SET_IS_ROOT_CONFIGURED'; payload: boolean }
   | { type: 'SET_PROJECTS'; payload: Project[] }
+  | { type: 'ADD_PROJECT'; payload: Project }
   | { type: 'ADD_TO_HORSE_FARM'; payload: string[] }
   | { type: 'REMOVE_FROM_HORSE_FARM'; payload: string }
   | { type: 'SET_HORSE_FARM_ACTIVE_PROJECT'; payload: string | null }
@@ -50,6 +51,9 @@ function hfReducer(state: HFState, action: HFAction): HFState {
       return { ...state, isRootConfigured: action.payload }
     case 'SET_PROJECTS':
       return { ...state, projects: action.payload }
+    case 'ADD_PROJECT':
+      if (state.projects.find(p => p.path === action.payload.path)) return state
+      return { ...state, projects: [...state.projects, action.payload] }
     case 'ADD_TO_HORSE_FARM':
       return {
         ...state,

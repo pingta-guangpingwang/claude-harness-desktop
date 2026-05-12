@@ -9,6 +9,7 @@ import { createCliToolWrapper, createSkillDiscoveryTool } from '../harnessAgent/
 import { registerTool } from '../harnessAgent/toolRegistry.js'
 import type { AgentContext, AgentEvent } from '../harnessAgent/types.js'
 import { harnessScheduler } from '../harnessAgent/scheduler.js'
+import { setNotifierWindow } from './projectNotifier.js'
 
 
 let mainWindow: BrowserWindow | null = null
@@ -22,6 +23,7 @@ const MAX_MEMORY_TURNS = 30
 
 export function registerHarnessIpc(window: BrowserWindow) {
   mainWindow = window
+  setNotifierWindow(window)
 
   // 确保工具只注册一次
   if (!toolsRegistered) {

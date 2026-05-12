@@ -35,6 +35,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('horsefarm:save-project-ids', ids, individualProjects),
   loadHorseFarmProjectIds: () =>
     ipcRenderer.invoke('horsefarm:load-project-ids'),
+  onProjectAdded: (handler: (projectPath: string, projectName: string) => void) => {
+    const cb = (_event: Electron.IpcRendererEvent, projectPath: string, projectName: string) => handler(projectPath, projectName)
+    ipcRenderer.on('horsefarm:project-added', cb)
+    return () => { ipcRenderer.removeListener('horsefarm:project-added', cb) }
+  },
   initializeAllProjects: (projects: Array<{ path: string; name: string }>) =>
     ipcRenderer.invoke('horsefarm:initialize-all', projects),
   saveProjectNotes: (projectPath: string, notes: string) =>

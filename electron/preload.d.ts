@@ -94,6 +94,7 @@ export interface ElectronAPI {
         ids: string[];
         individualProjects: Record<string, any>;
     }>;
+    onProjectAdded: (handler: (projectPath: string, projectName: string) => void) => () => void;
     initializeAllProjects: (projects: Array<{
         path: string;
         name: string;

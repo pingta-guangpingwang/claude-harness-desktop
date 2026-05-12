@@ -4,6 +4,7 @@ import { registerTool, getAllTools, executeTool } from './toolRegistry'
 import { spawnPtySession, killPtySession, getPtyStatus, writeToPty, sendAndCollect } from '../modules/ptyManager.js'
 import { taskQueue, type AgentTask } from './taskQueue.js'
 import { db } from '../modules/database.js'
+import { notifyProjectAdded } from '../modules/projectNotifier.js'
 import fs from 'fs'
 import path from 'path'
 
@@ -1306,6 +1307,9 @@ const createProjectTool: AgentTool = {
       }
       ctx.projectNames.set(projectPath, projectName)
       console.log('[CEO] AgentContext 已同步新项目:', projectPath)
+
+      // 3.6 推送通知到渲染层 → 项目列表即时刷新
+      notifyProjectAdded(projectPath, projectName)
 
       // 4. 唤醒 Claude Code 终端
       const spawnResult = await spawnPtySession(projectPath)

@@ -20,6 +20,7 @@ export interface ElectronAPI {
   loadHorseFarmConfig: () => Promise<{ success: boolean; config: any }>
   saveHorseFarmProjectIds: (ids: string[], individualProjects?: any) => Promise<{ success: boolean }>
   loadHorseFarmProjectIds: () => Promise<{ success: boolean; ids: string[]; individualProjects: Record<string, any> }>
+  onProjectAdded: (handler: (projectPath: string, projectName: string) => void) => () => void
   initializeAllProjects: (projects: Array<{ path: string; name: string }>) => Promise<{ success: boolean; results: Array<{ path: string; name: string; kb: string; mindmap: string }> }>
   saveProjectNotes: (projectPath: string, notes: string) => Promise<{ success: boolean; message?: string }>
   loadProjectNotes: (projectPath: string) => Promise<{ success: boolean; notes: string; message?: string }>
