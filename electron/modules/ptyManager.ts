@@ -39,6 +39,8 @@ interface PtySession {
 const sessions: Map<string, PtySession> = new Map()
 /** 持久化就绪状态：一旦检测到 ❯ 就设为 true，避免 waitForReady 错过已经出现过的提示符 */
 const ptyReady = new Map<string, boolean>()
+/** 自动应答去重：记录每个 session 最后一次应答时间，防止跨 data chunk 重复应答 */
+const autoReplyTimes = new Map<string, number>()
 /** 实时 PTY 输出环形缓冲区：供 read_project_chat 读取当前终端的真实内容 */
 const recentOutput = new Map<string, string[]>()
 const MAX_RECENT_LINES = 200
@@ -312,20 +314,41 @@ async function spawnWithRetry(file: string, args: string[], key: string, isClaud
       const joined = stripped.replace(/\n/g, ' ')
 
       // 🔑 自动应答 Claude Code 交互式对话框（headless PTY 无人操作）
-      // API Key 确认: "Do you want to use this API key? 1. Yes ❯ 2. No"
-      if (/Do you want to use this API key/i.test(joined) && /1\.\s*Yes/i.test(joined)) {
-        console.log('[PTY] ⚡ 自动应答 API Key 对话框 → Yes —', key.slice(-40))
-        newPty.write('1\r')
-      }
-      // 信任对话框: "Do you trust the files in this folder?"
-      if (/Do you (trust|want to load)/i.test(joined) && /(Yes|Trust|Continue|回车)/i.test(joined)) {
-        console.log('[PTY] ⚡ 自动应答信任对话框 → Yes —', key.slice(-40))
-        newPty.write('\r')
-      }
-      // 更新确认: "A new version .* is available" → 跳过
-      if (/A new version.*is available/i.test(joined) && /(Update|Skip|Later|以后)/i.test(joined)) {
-        console.log('[PTY] ⚡ 自动应答更新提示 → Skip —', key.slice(-40))
-        newPty.write('\x1b') // ESC 关闭
+      // 防重复应答：同一对话框可能跨多个 data 块，用最近应答时间去重
+      const now2 = Date.now()
+      const lastAutoReply = autoReplyTimes.get(key) || 0
+      if (now2 - lastAutoReply < 3000) {
+        // 3s 内已应答过，跳过（对话框跨多个 data chunk）
+        // 继续往下走到 ❯ 检测
+      } else {
+        // 信任/安全对话框 v2.1: "Quick safety check: Is this a project you created or one you trust?"
+        // 选项: "Yes, I trust this folder" / "No, exit"，默认 Yes → 回车即可
+        if (/Quick safety check|safety check.*project.*trust/i.test(joined) &&
+            /Yes.*trust.*folder/i.test(joined)) {
+          console.log('[PTY] ⚡ 自动应答信任对话框(Quick safety check) → Enter —', key.slice(-40))
+          autoReplyTimes.set(key, now2)
+          newPty.write('\r')
+        }
+        // 信任对话框 v2.0 旧版: "Do you trust the files in this folder?"
+        else if (/Do you (trust|want to load)/i.test(joined) &&
+                 /(Yes|Trust|Continue|回车)/i.test(joined)) {
+          console.log('[PTY] ⚡ 自动应答信任对话框(Do you trust) → Enter —', key.slice(-40))
+          autoReplyTimes.set(key, now2)
+          newPty.write('\r')
+        }
+        // API Key 确认: "Do you want to use this API key? 1. Yes ❯ 2. No"
+        else if (/Do you want to use this API key/i.test(joined) && /1\.\s*Yes/i.test(joined)) {
+          console.log('[PTY] ⚡ 自动应答 API Key 对话框 → Yes —', key.slice(-40))
+          autoReplyTimes.set(key, now2)
+          newPty.write('1\r')
+        }
+        // 更新确认: "A new version .* is available" → ESC 跳过
+        else if (/A new version.*is available/i.test(joined) &&
+                 /(Update|Skip|Later|以后)/i.test(joined)) {
+          console.log('[PTY] ⚡ 自动应答更新提示 → Skip —', key.slice(-40))
+          autoReplyTimes.set(key, now2)
+          newPty.write('\x1b')
+        }
       }
 
       // 扫描 ❯ 就绪信号 — 排除菜单里的 ❯（如 "❯ 2. No (recommended)"）
@@ -366,6 +389,7 @@ async function spawnWithRetry(file: string, args: string[], key: string, isClaud
       projectTokenAcc.delete(key)
       ptyReady.delete(key)
       recentOutput.delete(key)
+      autoReplyTimes.delete(key)
 
       if (!resolved && attempt < 2) {
         // 快速失败 → 重试
