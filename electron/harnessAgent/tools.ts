@@ -1260,13 +1260,13 @@ const createProjectTool: AgentTool = {
   isReadOnly: false,
   isConcurrencySafe: false,
   isDestructive: false,
-  async execute(_params: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
-    const projectName = _params.project_name as string
-    const description = (_params.description as string) || ''
+  async execute(params: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
+    const projectName = params.project_name as string
+    const description = (params.description as string) || ''
     try {
       // 1. 读取默认项目目录
       const config = await db.getConfig()
-      const settings = config.settings || {}
+      const settings = (config && config.settings) || {}
       const defaultDir = settings.defaultProjectDir || ''
       if (!defaultDir) {
         return { success: false, output: '未设置默认项目目录。请在设置中配置 "Default Project Directory"。' }
@@ -1299,6 +1299,13 @@ const createProjectTool: AgentTool = {
       }
       await db.setProjectIds({ ids, individualProjects })
       console.log('[CEO] 项目已注册到驾驭工程:', projectPath)
+
+      // 3.5 实时更新 AgentContext，让后续 task_project/broadcast 能立即找到新项目
+      if (!ctx.projectIds.includes(projectPath)) {
+        ctx.projectIds.push(projectPath)
+      }
+      ctx.projectNames.set(projectPath, projectName)
+      console.log('[CEO] AgentContext 已同步新项目:', projectPath)
 
       // 4. 唤醒 Claude Code 终端
       const spawnResult = await spawnPtySession(projectPath)

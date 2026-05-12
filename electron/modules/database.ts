@@ -25,7 +25,12 @@ async function write(name: string, data: any): Promise<void> {
 }
 
 export const db = {
-  getConfig: () => read('config', { projectIds: [], apiKeys: [], settings: { defaultProjectDir: '' } }),
+  getConfig: async () => {
+    const data = await read('config', { projectIds: [], apiKeys: [], settings: {} })
+    // 合并默认值：旧版本 config 可能缺少新字段
+    data.settings = { defaultProjectDir: '', ...(data.settings || {}) }
+    return data
+  },
   setConfig: (data: any) => write('config', data),
 
   getRootPath: async (): Promise<string> => {
