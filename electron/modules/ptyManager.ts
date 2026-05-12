@@ -86,9 +86,7 @@ function signalReady(key: string): void {
 }
 
 function waitForReady(key: string, timeoutMs: number = 15000): Promise<boolean> {
-  // 已经就绪过 → 立即返回
   if (ptyReady.has(key)) return Promise.resolve(true)
-  // 如果已有 ready signal，复用
   const existing = readySignals.get(key)
   if (existing) {
     return new Promise<boolean>(resolve => {
@@ -97,12 +95,50 @@ function waitForReady(key: string, timeoutMs: number = 15000): Promise<boolean> 
     })
   }
   return new Promise<boolean>(resolve => {
-    const timer = setTimeout(() => {
-      readySignals.delete(key)
-      console.log('[PTY] ⚠️ 等待就绪超时，放弃写入 —', key.slice(-40))
-      resolve(false) // 超时返回 false，禁止 force-write
-    }, timeoutMs)
-    readySignals.set(key, { resolver: () => resolve(true), timer })
+    const startedAt = Date.now()
+    const session = sessions.get(key)
+    const MAX_TOTAL_WAIT = 120000 // 最长等 2 分钟（API Key 对话框应答后 Claude Code 可能慢初始化）
+    let dataArrived = false
+
+    const tryResolve = (ready: boolean) => {
+      const rs = readySignals.get(key)
+      if (!rs) return // 已经 resolved
+      if (ready) {
+        clearTimeout(rs.timer)
+        rs.resolver()
+        readySignals.delete(key)
+        return
+      }
+      // 未就绪：如果数据一直在流（Claude Code 初始化中），延长等待
+      const elapsed = Date.now() - startedAt
+      if (elapsed >= MAX_TOTAL_WAIT) {
+        clearTimeout(rs.timer)
+        readySignals.delete(key)
+        console.log('[PTY] ⚠️ 等待就绪超时（已达最大 120s），放弃写入 —', key.slice(-40))
+        resolve(false)
+        return
+      }
+      // 最近 10s 内有数据 → 再等 15s
+      const lastData = session?.lastDataAt || 0
+      if (Date.now() - lastData < 10000) {
+        console.log('[PTY] ⏳ Claude Code 仍在初始化，延长等待 —', key.slice(-40), `(${Math.round(elapsed/1000)}s/${MAX_TOTAL_WAIT/1000}s)`)
+        dataArrived = true
+        rs.timer = setTimeout(() => tryResolve(false), 15000)
+        return
+      }
+      // 没数据到达过 → 进程可能死了，不等
+      if (!dataArrived) {
+        readySignals.delete(key)
+        console.log('[PTY] ⚠️ 无数据到达，PTY 可能已死，放弃写入 —', key.slice(-40))
+        resolve(false)
+        return
+      }
+      // 数据停止流动超过 10s → 可能初始化完了但没检测到 ❯，最多再等 15s
+      rs.timer = setTimeout(() => tryResolve(false), 15000)
+    }
+
+    const timer = setTimeout(() => tryResolve(false), timeoutMs)
+    readySignals.set(key, { resolver: () => { clearTimeout(timer); resolve(true) }, timer })
   })
 }
 

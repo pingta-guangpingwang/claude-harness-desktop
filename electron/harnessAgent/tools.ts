@@ -103,6 +103,37 @@ const stopProjectsTool: AgentTool = {
   },
 }
 
+const writePtyTool: AgentTool = {
+  name: 'write_to_pty',
+  description: '直接向项目 Claude Code 终端发送原始输入（如回车、数字选择、Ctrl+C 等）。用于：1) 应答 API Key 确认对话框（发送 "1" 选 Yes）2) 应答信任弹窗（发送空行=回车）3) 取消卡住的操作（发送 "\\x03"=Ctrl+C）。注意：这不是发任务，是直接按键输入。',
+  parameters: {
+    type: 'object',
+    properties: {
+      project_path: { type: 'string', description: '目标项目绝对路径' },
+      input: { type: 'string', description: '要发送的原始输入，如 "1"、""(回车)、"\\x03"(Ctrl+C)、"y"(确认)' },
+    },
+    required: ['project_path', 'input'],
+  },
+  group: 'control',
+  isReadOnly: false,
+  isConcurrencySafe: true,
+  async execute(params, ctx): Promise<ToolResult> {
+    const targetPath = params.project_path as string
+    const input = params.input as string
+    const match = ctx.projectIds.find(id => id === targetPath || id.toLowerCase() === targetPath.toLowerCase())
+    if (!match) return { success: false, output: `未找到项目: ${targetPath}` }
+    const name = ctx.projectNames.get(match) || match.split('\\').pop() || match
+    // 将 \x03 等转义序列转为实际字符
+    const resolved = input.replace(/\\x03/g, '\x03').replace(/\\r/g, '\r').replace(/\\n/g, '\n')
+    const data = resolved.endsWith('\r') || resolved.endsWith('\n') ? resolved : resolved + '\r'
+    const res = writeToPty(match, data)
+    if (res.success) {
+      return { success: true, output: `✅ 已向 ${name} 发送: "${input}"` }
+    }
+    return { success: false, output: `❌ ${name}: ${res.message || '发送失败'}` }
+  },
+}
+
 const checkStatusTool: AgentTool = {
   name: 'check_status',
   description: '检查全部项目的心跳状态（实时查询 PTY 连接状态+最后活跃时间），用于判断哪些项目正在工作中、哪些空闲、哪些离线。派发任务后用此工具轮询项目状态。',
@@ -1434,6 +1465,7 @@ export function registerAllTools(): void {
   // P0 — 管理控制
   registerTool(wakeProjectsTool)
   registerTool(stopProjectsTool)
+  registerTool(writePtyTool)
   registerTool(checkStatusTool)
   registerTool(broadcastTool)
   registerTool(taskProjectTool)

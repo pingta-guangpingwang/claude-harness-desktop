@@ -45,6 +45,8 @@ export declare function killPtySession(projectPath?: string): {
     success: boolean;
     message?: string;
 };
+/** 获取最近 PTY 输出（供 harnessAgent read_project_chat 工具读取实时终端内容） */
+export declare function getRecentPtyOutput(projectPath: string, maxLines?: number): string;
 /** 直接查询 PTY 状态（供 harnessAgent 工具调用，不走 IPC） */
 export declare function getPtyStatus(projectPath: string): {
     connected: boolean;
@@ -52,7 +54,5 @@ export declare function getPtyStatus(projectPath: string): {
     pid: number | null;
     lastDataAt: number;
 };
-/** 获取最近 PTY 输出（供 harnessAgent read_project_chat 读取实时终端内容） */
-export declare function getRecentPtyOutput(projectPath: string, maxLines?: number): string;
 export declare function registerPtyIpc(window: BrowserWindow): void;
 export {};
