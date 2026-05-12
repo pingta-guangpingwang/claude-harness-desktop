@@ -344,21 +344,28 @@ function createSessionId(): string {
 
 /** 查找 claude 命令的完整路径。统一通过 cmd.exe /c 启动，避免 node-pty ConPTY 直接 spawn .exe 时的路径解析问题（尤其在 VSCode 占用项目时） */
 function resolveClaudePath(): string {
+  // 1. 项目自带 nodejs 目录 (bootstrap 安装的)
+  const bundledNodeDir = path.join(__dirname, '..', '..', 'nodejs')
+  const bundledExe = path.join(bundledNodeDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')
+  if (fs.existsSync(bundledExe)) return bundledExe
+  const bundledCmd = path.join(bundledNodeDir, 'claude.cmd')
+  if (fs.existsSync(bundledCmd)) return bundledCmd
+
+  // 2. 全局 npm 目录
   const npmPrefix = process.env.APPDATA
     ? path.join(process.env.APPDATA, 'npm')
     : path.join(process.env.HOME || 'C:\\Users\\admin', 'AppData', 'Roaming', 'npm')
 
-  // claude.exe 本体
   const claudeExe = path.join(npmPrefix, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')
   if (fs.existsSync(claudeExe)) return claudeExe
 
-  // 回退: claude.cmd 批处理包装器
   const claudeCmd = path.join(npmPrefix, 'claude.cmd')
   if (fs.existsSync(claudeCmd)) return claudeCmd
 
   const claudeJs = path.join(npmPrefix, 'claude')
   if (fs.existsSync(claudeJs)) return claudeJs
 
+  // 3. 最后尝试 PATH 里的 claude
   return 'claude'
 }
 

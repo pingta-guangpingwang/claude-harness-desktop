@@ -67,9 +67,42 @@ if ($downloaded -and (Test-Path $nodeZip)) {
 
 if (Test-Path $nodeExe) {
     Write-Host "[OK] Node.js v$nodeVersion ready."
-    exit 0
 } else {
     Write-Host "[FAIL] Could not download Node.js."
     Write-Host "Install manually: https://nodejs.org"
     exit 1
 }
+
+# Check / install Claude Code CLI
+$env:Path = "$nodeDir;$env:Path"
+$claudeExe1 = Join-Path $nodeDir "node_modules\@anthropic-ai\claude-code\bin\claude.exe"
+$claudeCmd1 = Join-Path $nodeDir "claude.cmd"
+$globalClaudeExe = Join-Path $env:APPDATA "npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe"
+
+if ((Test-Path $claudeExe1) -or (Test-Path $claudeCmd1) -or (Test-Path $globalClaudeExe)) {
+    Write-Host "[OK] Claude Code CLI found."
+    exit 0
+}
+
+Write-Host ""
+Write-Host "Claude Code CLI not found - installing..."
+Write-Host ""
+
+$npmCliJs = Join-Path $nodeDir "node_modules\npm\bin\npm-cli.js"
+$installArgs = @($npmCliJs, "install", "-g", "@anthropic-ai/claude-code", "--registry=https://registry.npmmirror.com")
+
+# Try mirror first for speed in China, fall back to default
+$proc = Start-Process -FilePath $nodeExe -ArgumentList $installArgs -NoNewWindow -Wait -PassThru
+if ($proc.ExitCode -ne 0) {
+    Write-Host "Mirror failed, trying default registry..."
+    $installArgs = @($npmCliJs, "install", "-g", "@anthropic-ai/claude-code")
+    $proc = Start-Process -FilePath $nodeExe -ArgumentList $installArgs -NoNewWindow -Wait -PassThru
+}
+
+if ((Test-Path $claudeExe1) -or (Test-Path $claudeCmd1) -or (Test-Path $globalClaudeExe)) {
+    Write-Host "[OK] Claude Code CLI installed."
+} else {
+    Write-Host "[WARN] Claude Code CLI install may have failed."
+    Write-Host "You can install manually: npm install -g @anthropic-ai/claude-code"
+}
+exit 0
