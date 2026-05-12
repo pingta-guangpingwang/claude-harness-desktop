@@ -138,13 +138,6 @@ async function spawnWithRetry(file: string, args: string[], key: string, attempt
       if (!resolved) {
         resolved = true
         sendToRenderer('pty:spawned', key, sessionId, newPty.pid)
-        // 自动应答 Claude Code 信任确认 (y=Yes)
-        setTimeout(() => {
-          if (sessions.get(key)) {
-            newPty.write('y\r')
-            console.log('[PTY] 自动发送信任确认: y\\r →', key.slice(-30))
-          }
-        }, 3000)
       }
     }, 2500)
 

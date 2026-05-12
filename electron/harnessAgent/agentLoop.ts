@@ -106,7 +106,7 @@ export class AgentLoop {
     let pendingPrefetch = this.startContextPrefetch()
     let prefetchConsumed = false
 
-    let maxTurns = 20 // 足够 broadcast + poll_projects(6轮) + 汇总
+    let maxTurns = 30 // 充足的探活+广播+轮询+验收轮次
 
     while (maxTurns-- > 0) {
       if (signal.aborted) break
@@ -525,6 +525,16 @@ ${pluginSection}
 6. 只在要派发任务时才 wake_projects，任务完成不需要时可 stop_projects
 7. 项目 AI 把活干砸了？把错误信息发回给它，让它修复——而不是你去读写文件
 ${pluginTools.length > 0 ? '8. 插件工具是本地工具，直接调用，不派给项目 AI' : ''}
+9. **禁止反复读取同一文件**——一次 read_file 就够了，用 max_lines 控制长度，读完了就分析，不要重读
+10. **读源码读 .ts 文件，别读 .js**——.js 是编译产物，内容冗长且不直观；.ts 才是真正的源码
+11. **shell_exec 结果不乱码**——已自动注入 chcp 65001，输出即为 UTF-8 可读文本
+
+## 排查效率（重要！）
+遇到基础设施问题时：
+1. **先定位关键文件**——read_file 看目录结构，1-2 步找到关键文件
+2. **读关键代码段**——read_file + max_lines=80，只看核心函数，不全读
+3. **最多 4 步必须得出结论**——4 步后汇总已有发现，给出判断和行动方案，不要再深挖
+4. **发现即行动**——确认问题后直接用 write_file/shell_exec 修复，不要"需要我修复吗？"地问用户
 
 ## 工作流优先级
 1. 用户要求"体检"/"报告"/"汇总"/"总结" → health_report，一步到位

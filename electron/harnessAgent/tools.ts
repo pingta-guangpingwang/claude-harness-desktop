@@ -1160,7 +1160,8 @@ const shellExecTool: AgentTool = {
     const cwd = (params.cwd as string) || process.cwd()
     try {
       const { execSync } = await import('child_process')
-      const output = execSync(command, { cwd, timeout: 60000, encoding: 'utf-8', windowsHide: true })
+      // chcp 65001 强制 UTF-8 编码，避免中文 Windows GBK 乱码
+      const output = execSync(`chcp 65001 >nul && ${command}`, { cwd, timeout: 60000, encoding: 'utf-8', windowsHide: true })
       return { success: true, output: output.trim() || '(执行成功，无输出)' }
     } catch (e: any) {
       const stderr = e.stderr || ''

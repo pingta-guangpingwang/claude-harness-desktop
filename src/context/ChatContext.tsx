@@ -355,11 +355,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    // 3.0.1: 同时打开 VSCode
-    window.electronAPI.openInVSCode(key).then(r => {
-      console.log('[Chat] VSCode launched:', r.success ? 'OK' : `FAIL: ${r.message}`)
-    })
-
     // 标记连接中
     updateSession(key, prev => ({ ...prev, isConnecting: true }))
 
