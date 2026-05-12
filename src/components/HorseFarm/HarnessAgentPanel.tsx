@@ -545,14 +545,15 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
       border: embedded ? '1px solid var(--app-border-primary)' : 'none',
       overflow: 'hidden',
     }}>
-      {/* 头部 + Tab 切换 */}
+      {/* 头部 + 快捷操作 + Tab 切换 */}
       <div style={{
         borderBottom: '1px solid var(--app-border-primary)',
         background: 'var(--app-bg-header)', flexShrink: 0,
       }}>
+        {/* 标题行 + 快捷操作按钮（始终可见） */}
         <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: embedded ? '6px 12px 0' : '8px 14px 0',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6,
+          padding: embedded ? '6px 12px' : '8px 14px',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 20 }}>🛡️</span>
@@ -565,16 +566,62 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
               </div>
             </div>
           </div>
-          {agentRunning && (
-            <button onClick={abortAgent} style={{
-              padding: '4px 10px', borderRadius: 6, border: '1px solid #ef4444',
-              background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: 11,
-            }}>
-              ⏹️ {ha.abort}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={wakeAllTerminals}
+              disabled={wakingAll}
+              style={{
+                padding: '5px 10px', borderRadius: 6, border: 'none',
+                background: wakingAll ? 'var(--app-bg-tertiary)' : '#10b981',
+                color: wakingAll ? 'var(--app-text-secondary)' : '#fff',
+                cursor: wakingAll ? 'not-allowed' : 'pointer',
+                fontSize: 11, fontWeight: 600, opacity: wakingAll ? 0.6 : 1,
+              }}
+            >
+              {wakingAll ? '⏳' : '🚀'} {ha.wakeAll}
             </button>
-          )}
+            <button
+              onClick={stopAllTerminals}
+              style={{
+                padding: '5px 10px', borderRadius: 6, border: '1px solid var(--app-border-primary)',
+                background: 'var(--app-bg-tertiary)', color: 'var(--app-danger)',
+                cursor: 'pointer', fontSize: 11, fontWeight: 500,
+              }}
+            >
+              🛑 {ha.stopAll}
+            </button>
+            <button
+              onClick={() => broadcastToAll('git status')}
+              style={{
+                padding: '5px 10px', borderRadius: 6, border: '1px solid var(--app-border-primary)',
+                background: 'var(--app-bg-tertiary)', color: 'var(--app-text-primary)',
+                cursor: 'pointer', fontSize: 11,
+              }}
+            >
+              📊 {ha.quickCheck}
+            </button>
+            <button
+              onClick={generateLaunchBatsAll}
+              style={{
+                padding: '5px 10px', borderRadius: 6, border: '1px solid var(--app-border-primary)',
+                background: 'var(--app-bg-tertiary)', color: 'var(--app-text-primary)',
+                cursor: 'pointer', fontSize: 11,
+              }}
+            >
+              🚀 {(ha as any).generateLaunchBats || '生成全部启动脚本'}
+            </button>
+            {agentRunning && (
+              <button onClick={abortAgent} style={{
+                padding: '5px 10px', borderRadius: 6, border: '1px solid #ef4444',
+                background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: 11,
+              }}>
+                ⏹️ {ha.abort}
+              </button>
+            )}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 0, padding: '6px 12px 0', marginTop: 4 }}>
+        {/* Tab 切换 */}
+        <div style={{ display: 'flex', gap: 0, padding: '0 12px 0', marginTop: 2 }}>
           <button
             onClick={() => setActiveTab('chat')}
             style={{
@@ -787,57 +834,6 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
       {/* ====== Tab: 状态监控 ====== */}
       {activeTab === 'monitor' && (
         <div style={{ flex: 1, overflow: 'auto', padding: embedded ? '8px 10px' : '12px 14px' }}>
-          {/* 快捷操作栏 */}
-          <div style={{
-            display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12,
-            padding: '10px 12px', borderRadius: 8,
-            background: 'var(--app-bg-secondary)', border: '1px solid var(--app-border-primary)',
-          }}>
-            <button
-              onClick={wakeAllTerminals}
-              disabled={wakingAll}
-              style={{
-                padding: '6px 14px', borderRadius: 6, border: 'none',
-                background: wakingAll ? 'var(--app-bg-tertiary)' : '#10b981',
-                color: wakingAll ? 'var(--app-text-secondary)' : '#fff',
-                cursor: wakingAll ? 'not-allowed' : 'pointer',
-                fontSize: 12, fontWeight: 600, opacity: wakingAll ? 0.6 : 1,
-              }}
-            >
-              {wakingAll ? '⏳ ' + ha.waking : '🚀 ' + ha.wakeAll}
-            </button>
-            <button
-              onClick={stopAllTerminals}
-              style={{
-                padding: '6px 14px', borderRadius: 6, border: '1px solid var(--app-border-primary)',
-                background: 'var(--app-bg-tertiary)', color: 'var(--app-danger)',
-                cursor: 'pointer', fontSize: 12, fontWeight: 500,
-              }}
-            >
-              🛑 {ha.stopAll}
-            </button>
-            <button
-              onClick={() => broadcastToAll('git status')}
-              style={{
-                padding: '6px 14px', borderRadius: 6, border: '1px solid var(--app-border-primary)',
-                background: 'var(--app-bg-tertiary)', color: 'var(--app-text-primary)',
-                cursor: 'pointer', fontSize: 12,
-              }}
-            >
-              📊 {ha.quickCheck}
-            </button>
-            <button
-              onClick={generateLaunchBatsAll}
-              style={{
-                padding: '6px 14px', borderRadius: 6, border: '1px solid var(--app-border-primary)',
-                background: 'var(--app-bg-tertiary)', color: 'var(--app-text-primary)',
-                cursor: 'pointer', fontSize: 12,
-              }}
-            >
-              🚀 {(ha as any).generateLaunchBats || '生成全部启动脚本'}
-            </button>
-          </div>
-
           {/* 权限设置 */}
           <div style={{
             marginBottom: 12, padding: '10px 12px', borderRadius: 8,
