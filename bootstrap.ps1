@@ -18,6 +18,10 @@ if (-not (Test-Path $nodeDir)) {
     New-Item -ItemType Directory -Path $nodeDir -Force | Out-Null
 }
 
+# Clean up leftovers from previous failed attempts
+if (Test-Path $nodeZip) { Remove-Item $nodeZip -Force }
+if (Test-Path $extractedDir) { Remove-Item $extractedDir -Recurse -Force }
+
 $urlOfficial = "https://nodejs.org/dist/v$nodeVersion/node-v$nodeVersion-win-x64.zip"
 $urlMirror = "https://npmmirror.com/dist/node/v$nodeVersion/node-v$nodeVersion-win-x64.zip"
 
@@ -46,8 +50,8 @@ if ($downloaded -and (Test-Path $nodeZip)) {
     Write-Host "Extracting..."
     Expand-Archive -Path $nodeZip -DestinationPath $nodeDir -Force
     if (Test-Path $extractedDir) {
-        Move-Item (Join-Path $extractedDir '*') -Destination $nodeDir -Force
-        Remove-Item $extractedDir -Force
+        Copy-Item (Join-Path $extractedDir '*') -Destination $nodeDir -Recurse -Force
+        Remove-Item $extractedDir -Recurse -Force
     }
     Remove-Item $nodeZip -Force
 }
