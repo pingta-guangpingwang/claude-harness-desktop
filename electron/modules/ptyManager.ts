@@ -54,14 +54,10 @@ export async function spawnPtySession(projectPath: string, command?: string, arg
   }
   const rawCmd = command || resolveClaudePath()
   const rawArgs = args || []
-  // 自动追加 --fork-session + --dangerously-skip-permissions，确保自动化无忧运行
+  // 自动追加 --fork-session，确保 Claude Code 不与 VSCode 扩展冲突
   const isClaude = rawCmd.toLowerCase().includes('claude')
-  const finalRawArgs = isClaude
-    ? [
-        ...(!rawArgs.includes('--fork-session') ? ['--fork-session'] : []),
-        ...(!rawArgs.includes('--dangerously-skip-permissions') ? ['--dangerously-skip-permissions'] : []),
-        ...rawArgs,
-      ]
+  const finalRawArgs = isClaude && !rawArgs.includes('--fork-session')
+    ? ['--fork-session', ...rawArgs]
     : rawArgs
   const { file, args: finalArgs } = wrapCommand(rawCmd, finalRawArgs)
   console.log('[PTY] 启动命令:', file, '参数:', finalArgs, '工作目录:', key)
@@ -112,7 +108,8 @@ async function spawnWithRetry(file: string, args: string[], key: string, attempt
     })
 
     newPty.onExit(({ exitCode }: { exitCode: number }) => {
-      console.log('[PTY] 进程退出, 退出码:', exitCode, 'proj:', key.slice(-30))
+      const exitInfo = exitCode === 0 ? '正常退出' : exitCode === null ? '被信号杀死' : `退出码 ${exitCode}`
+      console.log(`[PTY] 进程退出 — ${exitInfo} — 项目:`, key.slice(-40))
       if (exitTimer) clearTimeout(exitTimer)
 
       if (!resolved && attempt < 2) {
@@ -254,14 +251,16 @@ export function feedCollector(projectPath: string, data: string): void {
 /** 清理 PTY 输出供驾驭智能体阅读：去除 ANSI/TUI 噪音，提取有意义内容 */
 function cleanAgentOutput(raw: string): string {
   let out = raw
-    // 去除 OSC 序列
+    // 去除 OSC 序列 (ESC ] ... BEL/ST)
     .replace(/\x1b\][^\x07]*\x07/g, '')
-    // 去除光标移动/擦除 CSI
-    .replace(/\x1b\[[0-9;]*[ABCDEFGHJKSTfnsu]/g, '')
-    .replace(/\x1b\[\?[0-9;]*[hl]/g, '')
+    // 去除所有 CSI 序列 (ESC [ ... final-byte)
+    // 包括: 光标移动(CUU/CUD/CUF/CUB/...), 擦除(ED/EL), DEC 私有模式(?h/?l), XTerm 扩展(>m/<u), SGR(m)
+    .replace(/\x1b\[[ -/]*[@-~]/g, '')
+    // 去除 ESC 前缀的简单序列 (ESC >, ESC =, ESC c, etc)
+    .replace(/\x1b[#-Z\\\]^_`a-z~|]/g, '')
     .replace(/\x1b[>=]/g, '')
-    // 保留 SGR (颜色)，但去除多余的复位
-    .replace(/\x1b\[0?m/g, '')
+    // 去除残留的独立 ESC 字符
+    .replace(/\x1b/g, '')
     // CR/LF 处理
     .replace(/\r\n/g, '\n')
     .replace(/[^\n]*\r(?!\n)/g, '')

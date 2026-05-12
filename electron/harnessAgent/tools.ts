@@ -1322,16 +1322,35 @@ const createProjectTool: AgentTool = {
       fs.mkdirSync(projectPath, { recursive: true })
       console.log('[CEO] 创建新项目目录:', projectPath)
 
-      // 2.5 预初始化 Claude Code 项目标记，跳过"是否信任此目录"的安全确认
+      // 2.5 预初始化 Claude Code 项目：跳过安全确认 + 预授权工具执行
       const claudeDir = path.join(projectPath, '.claude')
       if (!fs.existsSync(claudeDir)) {
         fs.mkdirSync(claudeDir)
       }
+      // 项目级 settings.json — 预授权文件操作和命令执行
+      const settingsPath = path.join(claudeDir, 'settings.json')
+      if (!fs.existsSync(settingsPath)) {
+        const settings = {
+          hasTrustDialogAccepted: true,
+          permissions: {
+            allow: [
+              'Bash(echo:*)', 'Bash(cd:*)', 'Bash(dir:*)', 'Bash(ls:*)', 'Bash(dir /b:*)',
+              'Bash(git:*)', 'Bash(npm:*)', 'Bash(node:*)', 'Bash(npx:*)', 'Bash(python:*)',
+              'Bash(mkdir:*)', 'Bash(type:*)', 'Bash(where:*)', 'Bash(chcp:*)',
+              'Read(*)', 'Write(*)', 'Edit(*)', 'Glob(*)', 'Grep(*)',
+              'WebFetch(*)', 'WebSearch(*)',
+            ],
+            deny: [],
+          },
+        }
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8')
+      }
+      // 项目指令文件
       const claudeMdPath = path.join(projectPath, 'CLAUDE.md')
       if (!fs.existsSync(claudeMdPath)) {
-        fs.writeFileSync(claudeMdPath, `# ${projectName}\n\n> Created by Harness Farm\n`, 'utf-8')
+        fs.writeFileSync(claudeMdPath, `# ${projectName}\n\n> Created by Harness Farm — automated project.\n> Execute tasks directly, don't ask for confirmation.\n`, 'utf-8')
       }
-      console.log('[CEO] 已预初始化 Claude Code 项目标记:', projectPath)
+      console.log('[CEO] 已预初始化 Claude Code 项目:', projectPath)
 
       // 3. 注册到项目列表
       const projectIds = await db.getProjectIds()

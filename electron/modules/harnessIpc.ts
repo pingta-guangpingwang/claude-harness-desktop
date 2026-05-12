@@ -2,7 +2,7 @@
 // 渲染进程 → 主进程: harness:send, harness:abort, harness:resolve-permission
 // 主进程 → 渲染进程: harness:event (streaming agent events)
 
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, app } from 'electron'
 import { AgentLoop, PermissionManager, registerAllTools } from '../harnessAgent/index.js'
 import type { ConversationTurn } from '../harnessAgent/agentLoop.js'
 import { createCliToolWrapper, createSkillDiscoveryTool } from '../harnessAgent/cliBridge.js'
@@ -10,6 +10,8 @@ import { registerTool } from '../harnessAgent/toolRegistry.js'
 import type { AgentContext, AgentEvent } from '../harnessAgent/types.js'
 import { harnessScheduler } from '../harnessAgent/scheduler.js'
 import { setNotifierWindow } from './projectNotifier.js'
+import * as fs from 'fs'
+import * as path from 'path'
 
 
 let mainWindow: BrowserWindow | null = null
@@ -17,9 +19,36 @@ let agentLoop: AgentLoop | null = null
 let permissionManager: PermissionManager
 let toolsRegistered = false
 
-// 跨轮次对话记忆（保留上下文）
-const conversationMemory: ConversationTurn[] = []
+// 跨轮次对话记忆（持久化到本地，保留上下文）
+const MEMORY_FILE = path.join(app.getPath('userData'), 'conversation-memory.json')
+const conversationMemory: ConversationTurn[] = loadConversationMemory()
 const MAX_MEMORY_TURNS = 30
+
+function loadConversationMemory(): ConversationTurn[] {
+  try {
+    if (fs.existsSync(MEMORY_FILE)) {
+      const raw = fs.readFileSync(MEMORY_FILE, 'utf-8')
+      const data = JSON.parse(raw)
+      if (Array.isArray(data)) {
+        console.log('[HarnessIPC] 加载对话记忆:', data.length, '条')
+        return data.slice(-MAX_MEMORY_TURNS)
+      }
+    }
+  } catch (e) {
+    console.error('[HarnessIPC] 加载对话记忆失败:', e)
+  }
+  return []
+}
+
+function saveConversationMemory(): void {
+  try {
+    const dir = path.dirname(MEMORY_FILE)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(MEMORY_FILE, JSON.stringify(conversationMemory, null, 2), 'utf-8')
+  } catch (e) {
+    console.error('[HarnessIPC] 保存对话记忆失败:', e)
+  }
+}
 
 export function registerHarnessIpc(window: BrowserWindow) {
   mainWindow = window
@@ -71,6 +100,7 @@ export function registerHarnessIpc(window: BrowserWindow) {
       while (conversationMemory.length > MAX_MEMORY_TURNS) {
         conversationMemory.shift()
       }
+      saveConversationMemory()
       return { success: true, queued: true }
     }
 
@@ -90,6 +120,7 @@ export function registerHarnessIpc(window: BrowserWindow) {
       while (conversationMemory.length > MAX_MEMORY_TURNS) {
         conversationMemory.shift()
       }
+      saveConversationMemory()
 
       return { success: true, finalMessage }
     } catch (err: any) {
