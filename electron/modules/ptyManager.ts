@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
+import { db } from './database.js'
 
 // node-pty v1.1 无 TypeScript 类型声明
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -73,9 +74,22 @@ export async function spawnPtySession(projectPath: string, command?: string, arg
 /** 带重试的 spawn：首次失败等 2s 重试，第二次失败等 5s 最后尝试 */
 async function spawnWithRetry(file: string, args: string[], key: string, attempt: number): Promise<{ success: boolean; pid?: number; sessionId?: string; message?: string }> {
   try {
+    // 读取 CHD 中配置的 API Key，自动注入到 Claude Code 环境
+    const apiEnv: Record<string, string> = {}
+    try {
+      const config = await db.getConfig()
+      const apiKeys = (config && config.apiKeys) ? config.apiKeys : []
+      const activeKey = apiKeys.find((k: any) => k.enabled && k.status !== 'exhausted' && k.status !== 'error')
+      if (activeKey && activeKey.key) {
+        apiEnv['ANTHROPIC_API_KEY'] = activeKey.key
+        apiEnv['ANTHROPIC_BASE_URL'] = 'https://api.deepseek.com/anthropic'
+        console.log('[PTY] 已注入 API Key:', activeKey.name || '(unnamed)')
+      }
+    } catch (e) { /* config read failed, proceed without key */ }
+
     const newPty = pty.spawn(file, args, {
       cwd: key,
-      env: { ...process.env, TERM: 'xterm-256color', FORCE_COLOR: '1', COLORTERM: 'truecolor' },
+      env: { ...process.env, ...apiEnv, TERM: 'xterm-256color', FORCE_COLOR: '1', COLORTERM: 'truecolor' },
       cols: 120, rows: 40,
     })
     const sessionId = createSessionId()
