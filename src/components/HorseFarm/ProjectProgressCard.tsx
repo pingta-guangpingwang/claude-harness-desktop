@@ -301,27 +301,35 @@ export default function ProjectProgressCard({
             style={{ color: detailPanelType === 'audit' && detailProjectPath === hfProject.projectPath ? '#7c3aed' : '#6b7280', fontWeight: detailPanelType === 'audit' && detailProjectPath === hfProject.projectPath ? 600 : 400 }}
             title="审计"
           >📊</button>
-          {confirmRemove ? (
-            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-              <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 500 }}>{t.horseFarm.removeConfirm}</span>
-              <button
-                onClick={() => { onRemove(); setConfirmRemove(false) }}
-                style={{ padding: '2px 8px', borderRadius: '4px', border: 'none', background: '#dc2626', color: '#fff', cursor: 'pointer', fontSize: '10px' }}
-              >
-                {t.horseFarm.removeConfirmProceed}
-              </button>
-              <button
-                onClick={() => setConfirmRemove(false)}
-                style={{ padding: '2px 8px', borderRadius: '4px', border: '1px solid #d1d5db', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: '10px' }}
-              >
-                {t.horseFarm.removeConfirmCancel}
-              </button>
-            </div>
-          ) : (
+          <div style={{ position: 'relative' }}>
+            {confirmRemove ? (
+              <div style={{
+                position: 'absolute', bottom: '100%', right: 0, marginBottom: 4,
+                display: 'flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap',
+                padding: '6px 10px', borderRadius: 8,
+                background: '#fef2f2', border: '1px solid #fecaca',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+                zIndex: 100,
+              }} onClick={e => e.stopPropagation()}>
+                <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 500, whiteSpace: 'nowrap' }}>{t.horseFarm.removeConfirm}</span>
+                <button
+                  onClick={() => { onRemove(); setConfirmRemove(false) }}
+                  style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: '#dc2626', color: '#fff', cursor: 'pointer', fontSize: 10, whiteSpace: 'nowrap' }}
+                >
+                  {t.horseFarm.removeConfirmProceed}
+                </button>
+                <button
+                  onClick={() => setConfirmRemove(false)}
+                  style={{ padding: '2px 6px', borderRadius: 4, border: '1px solid #d1d5db', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 10, whiteSpace: 'nowrap' }}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : null}
             <button onClick={(e) => { e.stopPropagation(); setConfirmRemove(true) }} style={{ color: '#9ca3af' }}>
               {t.horseFarm.removeFromFarm}
             </button>
-          )}
+          </div>
         </div>
 
         {expanded && (
