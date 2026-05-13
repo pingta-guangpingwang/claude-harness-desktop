@@ -261,6 +261,14 @@ const broadcastTool: AgentTool = {
           await new Promise(r => setTimeout(r, 5000))
         }
 
+        // 🚫 防止打断正在工作的项目 AI：busy 的项目直接跳过
+        const busyTask = activeProjectTasks.get(id)
+        if (busyTask) {
+          const elapsed = Math.round((Date.now() - busyTask.startedAt) / 1000)
+          const elapsedStr = elapsed < 120 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}min`
+          return { id, name, ok: true, skipped: true, output: `⏭️ ${name}: 项目 AI 正在工作中 (已进行 ${elapsedStr})，跳过不打扰` }
+        }
+
         // 标记为工作中，防止后续 task_project 打断
         markProjectBusy(id, `[broadcast] ${task.slice(0, 80)}`)
 

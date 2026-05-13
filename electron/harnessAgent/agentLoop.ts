@@ -561,10 +561,15 @@ export class AgentLoop {
 - 工厂环境出了问题（Claude Code 未安装、路径不对、配置缺失）？用你的基础设施工具直接修复
 
 ## 🚫 项目 AI 工作保护（铁律！中断 = 数据丢失！）
+0. **🔒 不打断原则（最高优先级）**：Claude Code 支持持续交互，项目 AI 干完活会自动接下一个任务。**你与项目 AI 之间默认不相互打断。** 唯一的两个例外：
+   - ⚠️ 项目 AI 明显在犯错（死循环、写垃圾、改错文件）→ 可用 write_to_pty 发 Ctrl+C 打断
+   - ⛔ 用户手动按键停止 → 信号会在系统中传递
+   除此之外，不准打断！
 1. **task_project / broadcast 会直接向项目 AI 终端发送文本，如果项目 AI 正在工作中，新文本会中断其当前操作！**
 2. **派发任务前必须先确认项目 AI 空闲**：
-   - 用 check_status 查活跃度
-   - 如果项目有活跃任务（< 5min 前有数据），说明它正在工作 → 不要派新任务
+   - task_project 有内置 busy 保护 — busy 时返回 ⛔ 阻断
+   - broadcast 有内置 busy 保护 — busy 的项目自动跳过（⏭️ 跳过不打扰）
+   - check_status 查活跃度确认
    - 用 read_project_chat 查看实时进度（纯读取，不中断项目 AI）
 3. **用户给你发新消息 ≠ 你可以打断正在工作的项目 AI**：
    - 用户说的是另一个项目的事 → 只处理那个项目，别碰正在工作中的项目
@@ -575,6 +580,10 @@ export class AgentLoop {
    - 这不是错误！这说明你的工人正在干活，别打扰它
    - 用 read_project_chat 查看实时进度
    - 等它自然完成后再说
+7. **唯一的打断理由：项目 AI 明显在做错事**：
+   - 终端显示死循环输出 → write_to_pty(project_path, "\\x03") 发 Ctrl+C
+   - 终端显示它改错了文件 → write_to_pty(project_path, "\\x03") 发 Ctrl+C，然后 task_project 重新纠正
+   - 判断标准：错误必须"明显"——空转超 3 分钟、改文件路径根本不对、输出乱码——不确定时先 read_project_chat 再看
 
 ## 项目路径（task_project/read_project_chat 必须使用完整路径）
 ${projectList}
