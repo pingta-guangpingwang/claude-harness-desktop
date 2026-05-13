@@ -37,7 +37,7 @@ function touchProjectCheck(projectPath: string): void {
 
 const wakeProjectsTool: AgentTool = {
   name: 'wake_projects',
-  description: '启动/唤醒项目的 Claude Code 终端。已在线则跳过。新启动的项目会自动发送"你好"快速验证响应。返回每个项目的启动+响应结果。注意：唤醒后不要接着派任务！这是验证性唤醒，确认在线即可。',
+  description: '【纯唤醒/验证工具，不是任务派发工具！调用后严禁接着调 broadcast 或 task_project！】启动/唤醒项目的 Claude Code 终端。已在线则跳过。新启动的项目会自动发送"你好"快速验证响应。返回每个项目的启动+响应结果（✅已响应/⚠️未响应）。用户说"唤醒"/"启动终端"/"检查在线"→只调这个，汇报结果即完成。',
   parameters: {
     type: 'object',
     properties: {
