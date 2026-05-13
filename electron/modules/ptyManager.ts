@@ -349,6 +349,18 @@ async function spawnWithRetry(file: string, args: string[], key: string, isClaud
           autoReplyTimes.set(key, now2)
           newPty.write('\x1b')
         }
+        // Bash 权限对话框: "Do you want to proceed? 1. Yes ❯ 2. No"
+        else if (/Do you want to proceed/i.test(joined) && /1\.\s*Yes/i.test(joined)) {
+          console.log('[PTY] ⚡ 自动应答 Bash 权限对话框 → Yes —', key.slice(-40))
+          autoReplyTimes.set(key, now2)
+          newPty.write('1\r')
+        }
+        // Auto-update 失败: "Auto-update failed" → 回车跳过，继续工作
+        else if (/Auto-update failed/i.test(joined)) {
+          console.log('[PTY] ⚡ 自动应答 Auto-update failed → Enter —', key.slice(-40))
+          autoReplyTimes.set(key, now2)
+          newPty.write('\r')
+        }
       }
 
       // 扫描 ❯ 就绪信号 — 排除菜单里的 ❯（如 "❯ 2. No (recommended)"）

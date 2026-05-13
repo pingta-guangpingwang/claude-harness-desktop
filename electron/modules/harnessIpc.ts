@@ -202,6 +202,40 @@ export function registerHarnessIpc(window: BrowserWindow) {
     // Agent 不在运行 → 这里不做静默启动，等用户下次交互时自主模式取队列
     console.log('[Scheduler] 任务已入队列，等待 Agent 取用')
   })
+
+  // ====== 操作日志持久化 ======
+  const OP_LOG_FILE = path.join(app.getPath('userData'), 'operation-log.json')
+
+  ipcMain.handle('harness:save-logs', async (_event, logs: Array<{
+    time: string; type: string; text: string; toolName?: string; fullContent?: string
+  }>) => {
+    try {
+      const dir = path.dirname(OP_LOG_FILE)
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+      const trimmed = logs.slice(-500)
+      fs.writeFileSync(OP_LOG_FILE, JSON.stringify(trimmed, null, 2), 'utf-8')
+      return { success: true }
+    } catch (e) {
+      console.error('[HarnessIPC] 保存操作日志失败:', e)
+      return { success: false, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('harness:load-logs', async () => {
+    try {
+      if (fs.existsSync(OP_LOG_FILE)) {
+        const raw = fs.readFileSync(OP_LOG_FILE, 'utf-8')
+        const data = JSON.parse(raw)
+        if (Array.isArray(data)) {
+          console.log('[HarnessIPC] 加载操作日志:', data.length, '条')
+          return { success: true, logs: data.slice(-500) }
+        }
+      }
+    } catch (e) {
+      console.error('[HarnessIPC] 加载操作日志失败:', e)
+    }
+    return { success: true, logs: [] }
+  })
 }
 
 function sendToRenderer(channel: string, ...args: unknown[]) {

@@ -108,6 +108,8 @@ export interface ElectronAPI {
   harnessScheduleRemove: (id: string) => Promise<{ success: boolean; error?: string }>
   harnessScheduleSetEnabled: (id: string, enabled: boolean) => Promise<{ success: boolean }>
   harnessScheduleList: () => Promise<{ success: boolean; tasks: any[]; stats: any }>
+  harnessSaveLogs: (logs: any[]) => Promise<{ success: boolean; error?: string }>
+  harnessLoadLogs: () => Promise<{ success: boolean; logs: any[] }>
   // CLI Command System (v3.1)
   cliSearch: (query: string) => Promise<{ success: boolean; commands: any[] }>
   cliList: () => Promise<{ success: boolean; commands: any[] }>

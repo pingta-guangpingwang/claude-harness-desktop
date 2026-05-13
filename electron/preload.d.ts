@@ -94,7 +94,6 @@ export interface ElectronAPI {
         ids: string[];
         individualProjects: Record<string, any>;
     }>;
-    onProjectAdded: (handler: (projectPath: string, projectName: string) => void) => () => void;
     initializeAllProjects: (projects: Array<{
         path: string;
         name: string;
@@ -385,6 +384,14 @@ export interface ElectronAPI {
         success: boolean;
         tasks: any[];
         stats: any;
+    }>;
+    harnessSaveLogs: (logs: any[]) => Promise<{
+        success: boolean;
+        error?: string;
+    }>;
+    harnessLoadLogs: () => Promise<{
+        success: boolean;
+        logs: any[];
     }>;
     cliSearch: (query: string) => Promise<{
         success: boolean;

@@ -8,6 +8,30 @@ import { notifyProjectAdded } from '../modules/projectNotifier.js'
 import fs from 'fs'
 import path from 'path'
 
+// ============== 活跃任务追踪 ==============
+// 防止驾驭智能体向正在工作中的项目 AI 重复派发任务（会中断当前工作！）
+const activeProjectTasks = new Map<string, { task: string; startedAt: number; lastCheckAt: number }>()
+
+export function getActiveProjectTasks(): ReadonlyMap<string, { task: string; startedAt: number; lastCheckAt: number }> {
+  return activeProjectTasks
+}
+
+export function isProjectBusy(projectPath: string): boolean {
+  return activeProjectTasks.has(projectPath)
+}
+
+function markProjectBusy(projectPath: string, task: string): void {
+  activeProjectTasks.set(projectPath, { task, startedAt: Date.now(), lastCheckAt: Date.now() })
+}
+
+function markProjectIdle(projectPath: string): void {
+  activeProjectTasks.delete(projectPath)
+}
+
+function touchProjectCheck(projectPath: string): void {
+  const entry = activeProjectTasks.get(projectPath)
+  if (entry) entry.lastCheckAt = Date.now()
+}
 
 // ============== P0 核心控制工具 ==============
 
@@ -154,9 +178,25 @@ const checkStatusTool: AgentTool = {
       const secSinceLastData = ptyStatus.lastDataAt > 0 ? Math.floor((now - ptyStatus.lastDataAt) / 1000) : 99999
       const isWorking = isOnline && secSinceLastData < 30
       if (isWorking) working++
+
+      // 检查活跃任务注册表
+      const busyInfo = activeProjectTasks.get(id)
+      let busyTag = ''
+      if (busyInfo) {
+        touchProjectCheck(id)
+        const busyElapsed = Math.round((now - busyInfo.startedAt) / 1000)
+        const busyElapsedStr = busyElapsed < 120 ? `${busyElapsed}s` : `${Math.floor(busyElapsed / 60)}min`
+        busyTag = ` ⚡有任务进行中(${busyElapsedStr}): "${busyInfo.task.slice(0, 40)}..."`
+      }
+
       let status: string
       if (!isOnline) {
         status = '🔴 离线'
+        // 离线超过 5 分钟自动清除 busy 标记
+        if (busyInfo && busyInfo.startedAt < now - 300000) {
+          markProjectIdle(id)
+          busyTag = ''
+        }
       } else if (isWorking) {
         status = '🟢 工作中'
       } else if (secSinceLastData < 300) {
@@ -165,9 +205,9 @@ const checkStatusTool: AgentTool = {
         status = `⚪ 无活动(${Math.floor(secSinceLastData / 60)}min前)`
       }
       const detail = isOnline && ptyStatus.pid ? ` PID:${ptyStatus.pid}` : ''
-      lines.push(`${status} — ${name}${detail}`)
+      lines.push(`${status} — ${name}${detail}${busyTag}`)
     }
-    lines.unshift(`总计: ${online}/${ctx.projectIds.length} 在线, ${working} 工作中`)
+    lines.unshift(`总计: ${online}/${ctx.projectIds.length} 在线, ${working} 工作中, ${activeProjectTasks.size} 有活跃任务`)
     return { success: true, output: lines.join('\n') }
   },
 }
@@ -210,8 +250,17 @@ const broadcastTool: AgentTool = {
           await new Promise(r => setTimeout(r, 5000))
         }
 
+        // 标记为工作中，防止后续 task_project 打断
+        markProjectBusy(id, `[broadcast] ${task.slice(0, 80)}`)
+
         // 发送任务并等待回复（最长 90s）
         const result = await sendAndCollect(id, task, 120000, name)
+
+        // 清除 busy 标记（broadcast 完成一轮收集，但项目 AI 可能还在继续）
+        const looksStillWorking = /wibbling|thinking|working|进行中|处理中/i.test(result.output || '')
+        if (!looksStillWorking) {
+          markProjectIdle(id)
+        }
 
         if (result.success && result.output) {
           // 推送项目回复到驾驭对话
@@ -229,6 +278,7 @@ const broadcastTool: AgentTool = {
         }
         return { id, name, ok: true, output: `⚠️ ${name}: 已派发但无回复` }
       } catch (err) {
+        markProjectIdle(id)
         return { id, name, ok: false, output: `❌ ${name}: ${String(err)}` }
       }
     })
@@ -300,6 +350,23 @@ const taskProjectTool: AgentTool = {
     }
     const name = ctx.projectNames.get(match) || match.split('\\').pop() || match
 
+    // 🚫 防止中断正在工作的项目 AI
+    const existingTask = activeProjectTasks.get(match)
+    if (existingTask) {
+      const elapsed = Math.round((Date.now() - existingTask.startedAt) / 1000)
+      const elapsedStr = elapsed < 120 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}min`
+      return {
+        success: false,
+        output: `⛔ ${name}: 项目 AI 正在工作中 (已进行 ${elapsedStr})，任务: "${existingTask.task.slice(0, 100)}..."
+🚫 禁止中断！中断 = 放弃当前进度 + 可能造成数据丢失。
+✅ 正确做法：
+  1. 用 read_project_chat(project_path="${match}") 查看实时进度（纯读取，不中断）
+  2. 用 check_status 确认项目是否仍在活跃
+  3. 等待项目 AI 自然完成后再派发新任务
+  4. 如果其他项目需要干活，先处理其他项目，别打扰这个`
+      }
+    }
+
     try {
       // 确保 PTY 在线
       const status = getPtyStatus(match)
@@ -312,11 +379,18 @@ const taskProjectTool: AgentTool = {
         await new Promise(r => setTimeout(r, 6000))
       }
 
+      // 标记项目为工作中
+      markProjectBusy(match, task)
+
       // 发送任务并等待项目 AI 回复（最长 120s）
       const result = await sendAndCollect(match, task, 120000, name)
 
       // 空回复检测：PTY 可能已死或卡在安全确认
       if (!result.output || result.output === '(无回复内容)' || result.output === '(超时 — 无回复)' || result.output === '(被新任务中断)') {
+        // 被中断 → 保留 busy 标记；其他情况 → 清除
+        if (result.output !== '(被新任务中断)') {
+          markProjectIdle(match)
+        }
         const aliveCheck = getPtyStatus(match)
         if (!aliveCheck.connected) {
           return { success: false, output: `❌ ${name}: 终端已断开 (PID 已退出)。请重新 wake_projects 唤醒后再派发任务。` }
@@ -326,9 +400,23 @@ const taskProjectTool: AgentTool = {
         return { success: false, output: `⚠️ ${name}: 终端在线但无回复 (空闲 ${idleSec}s)。可能卡在安全确认或初始化中，请先 read_project_chat 查看终端状态再决定下一步。` }
       }
 
+      // ⚠️ 重要：sendAndCollect 返回不代表项目 AI 完成工作！
+      // Claude Code 可能在 120s 超时时仍在 "Wibbling"（思考中）
+      // 保留 busy 标记，让后续只读工具来监控进度
+      const looksStillWorking = /wibbling|thinking|working|进行中|处理中/i.test(result.output)
+      if (looksStillWorking) {
+        // 项目 AI 明显还在工作，保持 busy 标记
+      } else {
+        // 有回复但不一定完成了 —— 只清除 busy 如果明确显示 done
+        const isClearlyDone = /success|完成|done|✓|✅|ok|正常|finished|complete/i.test(result.output)
+        if (isClearlyDone) {
+          markProjectIdle(match)
+        }
+        // 否则保持 busy：项目 AI 可能还在继续处理
+      }
+
       if (result.success && result.output) {
         // B3: 反馈解析 — 检测成功/失败/需人工介入
-        const lower = result.output.toLowerCase()
         const isError = /error|错误|失败|exception|refused|denied|无法|不能|❌|✗/i.test(result.output)
         const isWarn = /warning|警告|注意|deprecated|建议/i.test(result.output)
         const isSuccess = /success|成功|完成|done|✓|✅|ok|正常/i.test(result.output)
@@ -337,7 +425,7 @@ const taskProjectTool: AgentTool = {
         let autoFollowUp = ''
         if (isError && !isSuccess) {
           statusTag = '❌ 失败'
-          // 自动添加跟进任务
+          markProjectIdle(match) // 失败了就清除 busy，准备修复
           if (result.output.length < 2000) {
             taskQueue.add({
               type: 'follow_up',
@@ -352,11 +440,14 @@ const taskProjectTool: AgentTool = {
         } else if (isSuccess) {
           statusTag = '✅ 成功'
         } else {
-          statusTag = '📝 已回复'
+          statusTag = looksStillWorking ? '⏳ 工作中' : '📝 已回复'
         }
 
         const preview = result.output.slice(0, 3000)
         const suffix = result.output.length > 3000 ? '\n... (已截断)' : ''
+
+        // 提醒检查进度
+        const progressNote = looksStillWorking ? '\n\n⏳ 项目 AI 仍在工作中，建议用 read_project_chat 监控进度。' : ''
 
         // 🔔 项目 AI 回复主动推送到驾驭对话窗口
         ctx.emitEvent?.({
@@ -367,10 +458,11 @@ const taskProjectTool: AgentTool = {
           timestamp: new Date().toISOString(),
         })
 
-        return { success: true, output: `${statusTag} ${name}:\n${preview}${suffix}${autoFollowUp}` }
+        return { success: true, output: `${statusTag} ${name}:\n${preview}${suffix}${autoFollowUp}${progressNote}` }
       }
       return { success: result.success, output: `⚠️ ${name}: 已派发但无回复\n💡 使用 poll_projects 等待项目 AI 回复，或用 read_project_chat 查看实时进度。` }
     } catch (err) {
+      markProjectIdle(match)
       return { success: false, output: `❌ ${name}: ${String(err)}` }
     }
   },
@@ -445,6 +537,19 @@ const pollProjectsTool: AgentTool = {
     }
 
     lines.unshift(`活跃: ${activeCount}/${paths.length}, 本轮新数据: ${changedCount}`)
+    // ⚠️ 关键提醒：idle ≠ done！必须验证终端是否真的完成了还是被卡住了
+    const idleButShouldBeWorking = paths.filter(id => {
+      const s = getPtyStatus(id)
+      const secSinceLastData = s.lastDataAt > 0 ? Math.floor((Date.now() - s.lastDataAt) / 1000) : 99999
+      return s.connected && secSinceLastData >= 15 && activeProjectTasks.has(id)
+    })
+    if (idleButShouldBeWorking.length > 0) {
+      const names = idleButShouldBeWorking.map(id => ctx.projectNames.get(id) || id.split('\\').pop() || id)
+      lines.push(`\n⚠️ ${names.join(', ')} 有活跃任务但本轮变空闲了 — 可能被阻塞对话框卡住！`)
+      lines.push(`🚨 立即用 read_project_chat 查看 📡实时终端输出，确认没有 "Do you want to proceed?" / "API Key" / "Auto-update failed" 等阻塞提示`)
+    } else if (changedCount === 0 && activeCount === 0) {
+      lines.push(`\n💡 所有项目空闲 — 用 read_project_chat 确认它们是完成了还是被卡住了。idle ≠ done！`)
+    }
     return { success: true, output: lines.join('\n') }
   },
 }
@@ -588,21 +693,23 @@ const readProjectChatTool: AgentTool = {
         } catch { /* skip corrupt */ }
       }
 
-      // 同时读取实时 PTY 终端输出（.dbvs/chat 可能没有最新数据）
+      // ⚠️ 实时 PTY 终端输出放最前面！.dbvs/chat 是旧数据，实时终端才是当前状态
       const liveOutput = getRecentPtyOutput(match, 80)
       const liveSection = liveOutput
-        ? `\n\n📡 实时终端最近输出:\n${'─'.repeat(50)}\n${liveOutput.slice(-3000)}`
+        ? `📡 实时终端当前输出 (最近80行):\n${'─'.repeat(50)}\n${liveOutput.slice(-3000)}\n${'─'.repeat(50)}`
         : ''
 
       if (messages.length === 0) {
         const fallback = liveSection
-          ? `📋 ${name}: .dbvs/chat 暂无记录。\n${liveSection}`
+          ? `📋 ${name}: .dbvs/chat 暂无记录。\n\n${liveSection}`
           : `📭 ${name}: ${hours ? `最近 ${hours} 小时内` : ''}无聊天记录，实时终端也无输出`
         return { success: true, output: fallback }
       }
 
-      const header = `📋 ${name} 最近 ${totalMsgs} 条聊天记录:\n${'─'.repeat(50)}\n`
-      return { success: true, output: header + messages.reverse().join('\n') + liveSection }
+      const header = `📋 ${name} .dbvs/chat 历史记录 (${totalMsgs} 条，可能不是当前会话):\n${'─'.repeat(50)}\n`
+      const chatSection = messages.reverse().join('\n')
+      // 实时终端 FIRST，历史聊天 SECOND — 实时终端才是当前状态！
+      return { success: true, output: liveSection + '\n' + header + chatSection }
     } catch (err) {
       return { success: false, output: `❌ 读取 ${name} 聊天记录失败: ${String(err)}` }
     }

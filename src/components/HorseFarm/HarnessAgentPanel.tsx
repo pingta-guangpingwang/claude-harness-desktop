@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from '
 import { useChat } from '../../context/ChatContext'
 import { useI18n } from '../../i18n'
 import type { HorseFarmProject, HFConfig } from '../../types/horseFarm'
-import { getLogs, addLog as addStoreLog, appendLastAiText, clearLogs, subscribe, getAgentRunning, subscribeAgentRunning, setAgentRunning, type LogEntry } from './harnessChatStore'
+import { getLogs, addLog as addStoreLog, appendLastAiText, clearLogs, loadLogs, subscribe, getAgentRunning, subscribeAgentRunning, setAgentRunning, type LogEntry } from './harnessChatStore'
 
 interface HarnessAgentPanelProps {
   projectIds: string[]
@@ -111,6 +111,19 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
     } catch { return [] }
   })
 
+  // 聊天字体缩放
+  const [chatFontScale, setChatFontScale] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('harness_chat_font_scale')
+      return saved ? parseFloat(saved) : 1.0
+    } catch { return 1.0 }
+  })
+  const setFontScale = (v: number) => {
+    const clamped = Math.max(0.8, Math.min(1.8, v))
+    setChatFontScale(clamped)
+    localStorage.setItem('harness_chat_font_scale', String(clamped))
+  }
+
   const allCommands = [...BUILTIN_COMMANDS, ...customCommands]
 
   const [showQuickPalette, setShowQuickPalette] = useState(false)
@@ -164,6 +177,15 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
     const interval = setInterval(tick, 3000)
     return () => clearInterval(interval)
   }, [projectIds, hfProjects, chat.projectStatuses])
+
+  // 恢复持久化的操作日志
+  useEffect(() => {
+    window.electronAPI.harnessLoadLogs().then(res => {
+      if (res.success && res.logs?.length) {
+        loadLogs(res.logs as LogEntry[])
+      }
+    }).catch(() => {})
+  }, [])
 
   // 加载权限设置
   useEffect(() => {
@@ -618,6 +640,24 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
                 ⏹️ {ha.abort}
               </button>
             )}
+            <span style={{ color: 'var(--app-border-primary)', margin: '0 2px' }}>|</span>
+            <button onClick={() => setFontScale(chatFontScale - 0.1)}
+              title="缩小字体"
+              style={{
+                padding: '3px 7px', borderRadius: 4, border: '1px solid var(--app-border-primary)',
+                background: 'var(--app-bg-tertiary)', color: 'var(--app-text-primary)',
+                cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1,
+              }}>A⁻</button>
+            <span style={{ fontSize: 10, color: 'var(--app-text-secondary)', minWidth: 28, textAlign: 'center' }}>
+              {Math.round(chatFontScale * 100)}%
+            </span>
+            <button onClick={() => setFontScale(chatFontScale + 0.1)}
+              title="放大字体"
+              style={{
+                padding: '3px 7px', borderRadius: 4, border: '1px solid var(--app-border-primary)',
+                background: 'var(--app-bg-tertiary)', color: 'var(--app-text-primary)',
+                cursor: 'pointer', fontSize: 14, fontWeight: 700, lineHeight: 1,
+              }}>A⁺</button>
           </div>
         </div>
         {/* Tab 切换 */}
@@ -666,7 +706,7 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
               </div>
               <div style={{
                 fontFamily: 'var(--app-font-mono)',
-                fontSize: 10, lineHeight: 1.7, color: 'var(--app-text-secondary)',
+                fontSize: 10 * chatFontScale, lineHeight: 1.7, color: 'var(--app-text-secondary)',
               }}>
                 {actionLog.length === 0 ? (
                   <div style={{ fontSize: 11 }}>{ha.noLogsYet}</div>
@@ -765,7 +805,7 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
                   width: '100%', padding: '7px 12px', borderRadius: 8,
                   border: '1px solid var(--app-border-input)',
                   background: 'var(--app-bg-input)', color: 'var(--app-text-primary)',
-                  fontSize: embedded ? 11 : 12, outline: 'none',
+                  fontSize: (embedded ? 11 : 12) * chatFontScale, outline: 'none',
                   opacity: 1,
                   boxSizing: 'border-box',
                 }}
@@ -1084,7 +1124,7 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
             </div>
             <div style={{
               flex: 1, overflow: 'auto', padding: '20px',
-              fontFamily: 'system-ui, sans-serif', fontSize: 13,
+              fontFamily: 'system-ui, sans-serif', fontSize: 13 * chatFontScale,
               lineHeight: 1.7, color: '#374151', whiteSpace: 'pre-wrap',
             }}>
               {reportModal.content}
@@ -1097,11 +1137,11 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
                 navigator.clipboard.writeText(reportModal.content)
               }} style={{
                 padding: '6px 14px', borderRadius: 6, border: '1px solid #d1d5db',
-                background: '#fff', cursor: 'pointer', fontSize: 12, color: '#374151',
+                background: '#fff', cursor: 'pointer', fontSize: 12 * chatFontScale, color: '#374151',
               }}>📋 {ha.reportCopy}</button>
               <button onClick={() => setReportModal({ title: '', content: '', visible: false })} style={{
                 padding: '6px 14px', borderRadius: 6, border: 'none',
-                background: '#6366f1', color: '#fff', cursor: 'pointer', fontSize: 12,
+                background: '#6366f1', color: '#fff', cursor: 'pointer', fontSize: 12 * chatFontScale,
               }}>{ha.reportClose}</button>
             </div>
           </div>
@@ -1130,7 +1170,7 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
             </div>
             <div style={{
               flex: 1, overflow: 'auto', padding: '20px',
-              fontFamily: 'system-ui, sans-serif', fontSize: 13,
+              fontFamily: 'system-ui, sans-serif', fontSize: 13 * chatFontScale,
               lineHeight: 1.7, color: '#374151', whiteSpace: 'pre-wrap',
             }}>
               {projectDetailModal.content}
@@ -1143,11 +1183,11 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
                 navigator.clipboard.writeText(projectDetailModal.content)
               }} style={{
                 padding: '6px 14px', borderRadius: 6, border: '1px solid #d1d5db',
-                background: '#fff', cursor: 'pointer', fontSize: 12, color: '#374151',
+                background: '#fff', cursor: 'pointer', fontSize: 12 * chatFontScale, color: '#374151',
               }}>📋 {ha.reportCopy}</button>
               <button onClick={() => setProjectDetailModal({ projectName: '', content: '', visible: false })} style={{
                 padding: '6px 14px', borderRadius: 6, border: 'none',
-                background: '#6366f1', color: '#fff', cursor: 'pointer', fontSize: 12,
+                background: '#6366f1', color: '#fff', cursor: 'pointer', fontSize: 12 * chatFontScale,
               }}>{ha.reportClose}</button>
             </div>
           </div>
