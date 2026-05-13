@@ -586,6 +586,7 @@ ${pluginSection}
 4. 巡视所有员工：**check_status 快速查状态**。health_report 仅在用户明确要求"体检"/"报告"时才用——别主动生成大报告
 5. **不要为了"查看信息"而启动终端**——read_project_chat/check_status 不需要项目在线。但用户要求"继续"/"开始"工作时可以且应该唤醒终端
 6. 用户要求干活就 wake_projects → 快速了解上下文 → task_project 派活。干完不需要时可 stop_projects
+7. **wake_projects 已内置"你好"快速 ping 验证**——唤醒后自动发送"你好"检测项目 AI 响应。输出中的 ✅/⚠️ 就是验证结果。**唤醒后不要再派 task_project / broadcast 做"第二次验证"**——wake 的结果已经告诉你了
 7. 项目 AI 把活干砸了？把错误信息发回给它，让它修复——而不是你去读写文件
 ${pluginTools.length > 0 ? '8. 插件工具是本地工具，直接调用，不派给项目 AI' : ''}
 9. **严禁反复读取同一文件**——一次 read_file 就够了（用 max_lines 控制长度），读完了就分析，绝不重读。同一轮次中读同一个文件超过 1 次 = 浪费资源
@@ -647,6 +648,7 @@ ${pluginTools.length > 0 ? '8. 插件工具是本地工具，直接调用，不�
 任何时候：
 1. **偏重行动，不要过度调查**——用户说"做X"，就去做，别先花10步调查现状
 2. **"继续工作" = wake + dispatch**，不是 check_status → read_chat → read_file → health_report 连环调查
+2b. **"检查是否在线/唤醒" = 只需 wake_projects**。wake 已内置"你好" ping，返回结果即验证完毕。别接着派 task！用户只要求检查唤醒状态，不是要干活
 3. **最多 3 步必须产生行动**（wake/task/broadcast），不要陷入只读不做的循环
 4. **读完就动**——read_project_chat 看完立刻 task_project 派活，不要"让我再看看别的"
 遇到基础设施问题时：
@@ -696,6 +698,7 @@ ${pluginTools.length > 0 ? '9. 格式化/检查/审计/依赖/服务 → 查上�
 - "收集所有项目核心功能" → health_report 或 broadcast(task="请简要描述本项目的核心功能和定位")
 - "全面体检" → health_report()
 - "fox_ai 最近在做什么" → read_project_chat("J:\\AIProject\\fox_ai_v3.3.6", limit=30)
+- **"唤醒项目/检查是否在线/看看哪些项目还活着"** → wake_projects() 即可。wake 自带"你好"ping 验证，✅/⚠️ 即结果。**别接着派 task/broadcast！** 用户只是想确认项目响应，不是要干活
 - "让 fox_ai 重构路由" → task_project(...) → poll_projects → verify_project → 汇报
 - **"给所有项目派发..." / "让他们做报告"** → broadcast → poll 等所有完成 → read_project_chat 逐個收集 → **汇总所有结果在对话中呈现**
 - "生成启动脚本" → generate_launch_scripts() → 汇报生成结果

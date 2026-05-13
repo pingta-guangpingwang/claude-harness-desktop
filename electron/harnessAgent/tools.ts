@@ -37,7 +37,7 @@ function touchProjectCheck(projectPath: string): void {
 
 const wakeProjectsTool: AgentTool = {
   name: 'wake_projects',
-  description: '启动项目的 Claude Code 终端，已运行则跳过。返回每个项目的启动结果。',
+  description: '启动/唤醒项目的 Claude Code 终端。已在线则跳过。新启动的项目会自动发送"你好"快速验证响应。返回每个项目的启动+响应结果。注意：唤醒后不要接着派任务！这是验证性唤醒，确认在线即可。',
   parameters: {
     type: 'object',
     properties: {
@@ -70,9 +70,20 @@ const wakeProjectsTool: AgentTool = {
         }
         const res = await spawnPtySession(id)
         if (res.success) {
-          results.push(`✅ ${name}: 启动成功 (PID ${res.pid})`)
-          // Claude Code 需要时间初始化（加载上下文/索引文件），等待更久
+          // Claude Code 需要时间初始化（加载上下文/索引文件）
           await new Promise(r => setTimeout(r, 6000))
+          // 快速 ping 验证：发"你好"看项目 AI 是否真正响应
+          const preOutput = getRecentPtyOutput(id)
+          writeToPty(id, '你好\r')
+          await new Promise(r => setTimeout(r, 3000))
+          const postOutput = getRecentPtyOutput(id)
+          const hasResponse = postOutput !== preOutput && postOutput.length > (preOutput?.length || 0) + 5
+          const postPreview = postOutput?.slice(-100) || '(无输出)'
+          if (hasResponse) {
+            results.push(`✅ ${name}: 已唤醒并响应 (PID ${res.pid}，对"你好"有回应)`)
+          } else {
+            results.push(`⚠️ ${name}: 终端已启动但尚未响应 (PID ${res.pid}，可能还在初始化或被对话框卡住)。终端末尾: ${postPreview.slice(-50)}`)
+          }
         } else {
           results.push(`❌ ${name}: 启动失败 - ${res.message || '未知'}`)
         }
