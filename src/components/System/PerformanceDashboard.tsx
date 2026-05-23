@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useI18n } from '../../i18n'
 import './System.css'
 
 interface PerfSnapshot {
@@ -15,6 +16,7 @@ interface PerfSnapshot {
 }
 
 export function PerformanceDashboard() {
+  const { t } = useI18n()
   const [latest, setLatest] = useState<PerfSnapshot | null>(null)
   const [history, setHistory] = useState<PerfSnapshot[]>([])
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -60,12 +62,12 @@ export function PerformanceDashboard() {
   return (
     <div className="sys-container sys-perf-container">
       <div className="sys-perf-header">
-        <h4>Performance Monitor</h4>
+        <h4>{t.system.performanceTitle}</h4>
         <div className="sys-perf-actions">
           <label className="sys-check">
-            <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} /> Auto-refresh
+            <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} /> {t.system.autoRefresh}
           </label>
-          <button onClick={refresh} className="sys-btn">Refresh</button>
+          <button onClick={refresh} className="sys-btn">{t.system.refresh}</button>
         </div>
       </div>
 
@@ -73,27 +75,27 @@ export function PerformanceDashboard() {
       {latest && (
         <div className="sys-perf-cards">
           <div className="sys-perf-card">
-            <div className="sys-perf-card-label">Uptime</div>
+            <div className="sys-perf-card-label">{t.system.uptime}</div>
             <div className="sys-perf-card-value">{formatUptime(latest.uptimeSeconds)}</div>
           </div>
           <div className="sys-perf-card">
-            <div className="sys-perf-card-label">Memory RSS</div>
+            <div className="sys-perf-card-label">{t.system.memoryRSS}</div>
             <div className="sys-perf-card-value">{formatBytes(latest.memory.rss)}</div>
           </div>
           <div className="sys-perf-card">
-            <div className="sys-perf-card-label">Heap Used</div>
+            <div className="sys-perf-card-label">{t.system.heapUsed}</div>
             <div className="sys-perf-card-value">{formatBytes(latest.memory.heapUsed)}</div>
           </div>
           <div className="sys-perf-card">
-            <div className="sys-perf-card-label">IPC Avg</div>
+            <div className="sys-perf-card-label">{t.system.ipcAvg}</div>
             <div className="sys-perf-card-value">{latest.ipcLatency.avgMs.toFixed(1)}ms</div>
           </div>
           <div className="sys-perf-card">
-            <div className="sys-perf-card-label">File IO</div>
+            <div className="sys-perf-card-label">{t.system.fileIO}</div>
             <div className="sys-perf-card-value">{latest.fileIO.reads + latest.fileIO.writes} ops</div>
           </div>
           <div className="sys-perf-card">
-            <div className="sys-perf-card-label">Samples</div>
+            <div className="sys-perf-card-label">{t.system.samples}</div>
             <div className="sys-perf-card-value">{history.length}</div>
           </div>
         </div>
@@ -103,7 +105,7 @@ export function PerformanceDashboard() {
       <div className="sys-perf-tabs">
         {(['overview', 'memory', 'ipc', 'io'] as const).map(tab => (
           <button key={tab} className={`sys-perf-tab ${viewMode === tab ? 'active' : ''}`} onClick={() => setViewMode(tab)}>
-            {tab === 'overview' ? 'Overview' : tab === 'memory' ? 'Memory' : tab === 'ipc' ? 'IPC Latency' : 'File IO'}
+            {tab === 'overview' ? t.system.overview : tab === 'memory' ? t.system.memory : tab === 'ipc' ? t.system.ipcLatency : t.system.fileIOTab}
           </button>
         ))}
       </div>
@@ -112,7 +114,7 @@ export function PerformanceDashboard() {
         {/* Memory Chart */}
         {(viewMode === 'overview' || viewMode === 'memory') && (
           <div className="sys-perf-chart">
-            <h5>Memory Usage</h5>
+            <h5>{t.system.memoryUsage}</h5>
             <div className="sys-perf-bars">
               {history.slice(-30).map((s, i) => (
                 <div key={i} className="sys-perf-bar-group" title={s.timestamp}>
@@ -132,7 +134,7 @@ export function PerformanceDashboard() {
         {/* IPC Latency Chart */}
         {(viewMode === 'overview' || viewMode === 'ipc') && (
           <div className="sys-perf-chart">
-            <h5>IPC Latency</h5>
+            <h5>{t.system.ipcLatencyChart}</h5>
             <div className="sys-perf-bars">
               {history.slice(-30).map((s, i) => (
                 <div key={i} className="sys-perf-bar-group" title={s.timestamp}>
@@ -151,22 +153,22 @@ export function PerformanceDashboard() {
         {/* File IO */}
         {(viewMode === 'overview' || viewMode === 'io') && (
           <div className="sys-perf-chart">
-            <h5>File I/O</h5>
+            <h5>{t.system.fileIOChart}</h5>
             <div className="sys-perf-stats-table">
               <div className="sys-perf-stat-row">
-                <span>Total Reads</span><span>{latest?.fileIO.reads || 0}</span>
+                <span>{t.system.totalReads}</span><span>{latest?.fileIO.reads || 0}</span>
               </div>
               <div className="sys-perf-stat-row">
-                <span>Total Writes</span><span>{latest?.fileIO.writes || 0}</span>
+                <span>{t.system.totalWrites}</span><span>{latest?.fileIO.writes || 0}</span>
               </div>
               <div className="sys-perf-stat-row">
-                <span>Read Volume</span><span>{formatBytes(latest?.fileIO.totalReadBytes || 0)}</span>
+                <span>{t.system.readVolume}</span><span>{formatBytes(latest?.fileIO.totalReadBytes || 0)}</span>
               </div>
               <div className="sys-perf-stat-row">
-                <span>Write Volume</span><span>{formatBytes(latest?.fileIO.totalWriteBytes || 0)}</span>
+                <span>{t.system.writeVolume}</span><span>{formatBytes(latest?.fileIO.totalWriteBytes || 0)}</span>
               </div>
               <div className="sys-perf-stat-row">
-                <span>Active PTYs</span><span>{latest?.activePTYCount || 0}</span>
+                <span>{t.system.activePTYs}</span><span>{latest?.activePTYCount || 0}</span>
               </div>
             </div>
           </div>
@@ -176,7 +178,7 @@ export function PerformanceDashboard() {
       {/* Recent IPC calls */}
       {latest && latest.ipcLatency.recentCalls.length > 0 && (viewMode === 'overview' || viewMode === 'ipc') && (
         <div className="sys-perf-ipc-table">
-          <h5>Recent IPC Calls</h5>
+          <h5>{t.system.recentIPCCalls}</h5>
           <div className="sys-perf-ipc-rows">
             {latest.ipcLatency.recentCalls.slice(-10).map((call, i) => (
               <div key={i} className="sys-perf-ipc-row">

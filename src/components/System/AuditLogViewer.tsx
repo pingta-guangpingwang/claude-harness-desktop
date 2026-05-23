@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useI18n } from '../../i18n'
 import './System.css'
 
 interface AuditEntry {
@@ -32,6 +33,7 @@ const RESULT_COLORS: Record<string, string> = {
 }
 
 export function AuditLogViewer() {
+  const { t } = useI18n()
   const [entries, setEntries] = useState<AuditEntry[]>([])
   const [filter, setFilter] = useState('')
   const [catFilter, setCatFilter] = useState<string>('all')
@@ -84,24 +86,24 @@ export function AuditLogViewer() {
       <div className="sys-audit-main">
         <div className="sys-audit-header">
           <div className="sys-audit-title-row">
-            <h4>Audit Log</h4>
+            <h4>{t.system.auditLog}</h4>
             <div className="sys-audit-actions">
               <label className="sys-check">
-                <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} /> Auto-refresh
+                <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} /> {t.system.autoRefresh}
               </label>
-              <button onClick={refresh} className="sys-btn">Refresh</button>
-              <button onClick={clearLogs} className="sys-btn sys-btn-del" style={{ background: 'transparent', color: '#ef4444' }}>Clear</button>
+              <button onClick={refresh} className="sys-btn">{t.system.refresh}</button>
+              <button onClick={clearLogs} className="sys-btn sys-btn-del" style={{ background: 'transparent', color: '#ef4444' }}>{t.system.clear}</button>
             </div>
           </div>
           <div className="sys-audit-filters">
-            <input className="sys-input" placeholder="Search..." value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 200 }} />
+            <input className="sys-input" placeholder={t.system.search} value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 200 }} />
             <select className="sys-select" value={catFilter} onChange={e => setCatFilter(e.target.value)}>
-              <option value="all">All Categories</option>
+              <option value="all">{t.system.allCategories}</option>
               {categories.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             {stats && (
               <div className="sys-audit-stats">
-                <span>{stats.totalEntries} entries</span>
+                <span>{t.system.entriesCount.replace('{count}', String(stats.totalEntries))}</span>
                 <span>{(stats.sizeBytes / 1024).toFixed(1)} KB</span>
               </div>
             )}
@@ -123,26 +125,26 @@ export function AuditLogViewer() {
               {e.durationMs != null && <span className="sys-audit-duration">{e.durationMs}ms</span>}
             </div>
           ))}
-          {filtered.length === 0 && <div className="sys-empty">No audit entries</div>}
+          {filtered.length === 0 && <div className="sys-empty">{t.system.noAuditRecords}</div>}
           <div ref={listEndRef} />
         </div>
       </div>
 
       {selectedEntry && (
         <div className="sys-audit-detail">
-          <h5>Entry Details</h5>
-          <div className="sys-detail-row"><label>ID</label><span>{selectedEntry.id}</span></div>
-          <div className="sys-detail-row"><label>Timestamp</label><span>{selectedEntry.timestamp}</span></div>
-          <div className="sys-detail-row"><label>Category</label><span style={{ color: CATEGORY_COLORS[selectedEntry.category] }}>{selectedEntry.category}</span></div>
-          <div className="sys-detail-row"><label>Action</label><span>{selectedEntry.action}</span></div>
-          <div className="sys-detail-row"><label>Actor</label><span>{selectedEntry.actor || '-'}</span></div>
-          <div className="sys-detail-row"><label>Target</label><span>{selectedEntry.target || '-'}</span></div>
-          <div className="sys-detail-row"><label>Result</label><span style={{ color: RESULT_COLORS[selectedEntry.result] }}>{selectedEntry.result}</span></div>
-          {selectedEntry.durationMs != null && <div className="sys-detail-row"><label>Duration</label><span>{selectedEntry.durationMs}ms</span></div>}
-          {selectedEntry.projectPath && <div className="sys-detail-row"><label>Project</label><span>{selectedEntry.projectPath.split('\\').pop()}</span></div>}
+          <h5>{t.system.entryDetails}</h5>
+          <div className="sys-detail-row"><label>{t.system.id}</label><span>{selectedEntry.id}</span></div>
+          <div className="sys-detail-row"><label>{t.system.timestamp}</label><span>{selectedEntry.timestamp}</span></div>
+          <div className="sys-detail-row"><label>{t.system.category}</label><span style={{ color: CATEGORY_COLORS[selectedEntry.category] }}>{selectedEntry.category}</span></div>
+          <div className="sys-detail-row"><label>{t.system.action}</label><span>{selectedEntry.action}</span></div>
+          <div className="sys-detail-row"><label>{t.system.actor}</label><span>{selectedEntry.actor || '-'}</span></div>
+          <div className="sys-detail-row"><label>{t.system.target}</label><span>{selectedEntry.target || '-'}</span></div>
+          <div className="sys-detail-row"><label>{t.system.result}</label><span style={{ color: RESULT_COLORS[selectedEntry.result] }}>{selectedEntry.result}</span></div>
+          {selectedEntry.durationMs != null && <div className="sys-detail-row"><label>{t.system.duration}</label><span>{selectedEntry.durationMs}ms</span></div>}
+          {selectedEntry.projectPath && <div className="sys-detail-row"><label>{t.system.project}</label><span>{selectedEntry.projectPath.split('\\').pop()}</span></div>}
           {selectedEntry.details && (
             <div className="sys-detail-json">
-              <label>Details</label>
+              <label>{t.system.details}</label>
               <pre>{JSON.stringify(selectedEntry.details, null, 2)}</pre>
             </div>
           )}

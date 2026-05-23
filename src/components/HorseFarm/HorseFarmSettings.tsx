@@ -163,12 +163,12 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
   }
 
   const statusBadge = (k: HFApiKey) => {
-    if (!k.enabled) return { label: 'Disabled', color: '#9ca3af', bg: '#f3f4f6' }
+    if (!k.enabled) return { label: t.settings.statusDisabled, color: '#9ca3af', bg: '#f3f4f6' }
     switch (k.status) {
-      case 'rate_limited': return { label: 'Rate Limited', color: '#d97706', bg: '#fef3c7' }
-      case 'exhausted': return { label: 'Quota Exhausted', color: '#dc2626', bg: '#fee2e2' }
-      case 'error': return { label: 'Error', color: '#dc2626', bg: '#fee2e2' }
-      default: return { label: 'Active', color: '#059669', bg: '#d1fae5' }
+      case 'rate_limited': return { label: t.settings.statusRateLimited, color: '#d97706', bg: '#fef3c7' }
+      case 'exhausted': return { label: t.settings.statusQuotaExhausted, color: '#dc2626', bg: '#fee2e2' }
+      case 'error': return { label: t.settings.statusError, color: '#dc2626', bg: '#fee2e2' }
+      default: return { label: t.settings.statusActive, color: '#059669', bg: '#d1fae5' }
     }
   }
 
@@ -219,14 +219,14 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
               {state.isRootConfigured && (
                 <button
                   onClick={() => { window.electronAPI.openFolder(state.rootRepoPath).catch(() => {}) }}
-                  title="Open in Explorer"
+                  title={t.settings.openInExplorer}
                   style={{
                     padding: '4px 10px', borderRadius: '5px', border: '1px solid #d1d5db',
                     background: '#fff', color: '#6b7280', cursor: 'pointer', fontSize: '11px',
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  Open
+                  {t.settings.openBtn}
                 </button>
               )}
             </div>
@@ -326,27 +326,27 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
       {/* ================================================================ */}
       <div style={{ marginBottom: '20px' }}>
         <h3 style={{ margin: '0 0 4px', fontSize: '16px', color: '#1f2937', fontWeight: 600 }}>
-          Provider
+          {t.settings.provider}
         </h3>
         <div style={{
           background: '#1e293b', borderRadius: '10px', padding: '16px 20px',
           color: '#e2e8f0',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <h4 style={{ margin: 0, fontSize: '14px', color: '#f1f5f9' }}>DeepSeek Anthropic API</h4>
-            <span style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace' }}>DeepSeek</span>
+            <h4 style={{ margin: 0, fontSize: '14px', color: '#f1f5f9' }}>{t.settings.providerName}</h4>
+            <span style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace' }}>{t.settings.providerVendor}</span>
           </div>
           <div style={{
             background: '#0f172a', borderRadius: '6px', padding: '10px 14px',
             fontFamily: 'Consolas, monospace', fontSize: '12px',
           }}>
-            <div style={{ color: '#94a3b8' }}>Base URL:</div>
+            <div style={{ color: '#94a3b8' }}>{t.settings.baseUrl}</div>
             <div style={{ color: '#67e8f9' }}>{BASE_URL}</div>
-            <div style={{ color: '#94a3b8', marginTop: '6px' }}>Auth Header:</div>
+            <div style={{ color: '#94a3b8', marginTop: '6px' }}>{t.settings.authHeader}</div>
             <div style={{ color: '#86efac' }}>x-api-key: {'<your-api-key>'}</div>
           </div>
           <div style={{ fontSize: '11px', color: '#64748b', marginTop: '8px' }}>
-            Use Anthropic SDK with DeepSeek models. Set ANTHROPIC_BASE_URL to {BASE_URL}
+            {t.settings.providerNote.replace('{url}', BASE_URL)}
           </div>
         </div>
       </div>
@@ -367,14 +367,14 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
                 background: '#4f46e5', color: '#fff', cursor: 'pointer', fontSize: '12px',
               }}
             >
-              + Add Key
+              {t.settings.addKey}
             </button>
           )}
         </div>
 
         {config.apiKeys.length === 0 && !showAddForm && (
           <div style={{ textAlign: 'center', padding: '24px', color: '#9ca3af', fontSize: '13px' }}>
-            No API keys configured. Add one to enable AI-powered features.
+            {t.settings.noApiKeys}
           </div>
         )}
 
@@ -404,26 +404,31 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
                     color: k.role === 'manager' ? '#7c3aed' : '#059669',
                     fontWeight: 500,
                   }}>
-                    {k.role === 'manager' ? 'Manager AI' : 'Worker'}
+                    {k.role === 'manager' ? t.settings.roleManager : t.settings.roleWorker}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '6px' }}>
                   <button onClick={() => handleToggle(k.id)}
                     style={{ fontSize: '11px', padding: '3px 8px', border: '1px solid #d1d5db', borderRadius: '4px', background: '#fff', color: '#374151', cursor: 'pointer' }}>
-                    {k.enabled ? 'Disable' : 'Enable'}
+                    {k.enabled ? t.settings.disableBtn : t.settings.enableBtn}
                   </button>
                   <button onClick={() => startEdit(k)}
                     style={{ fontSize: '11px', padding: '3px 8px', border: '1px solid #d1d5db', borderRadius: '4px', background: '#fff', color: '#374151', cursor: 'pointer' }}>
-                    Edit
+                    {t.settings.editBtn}
                   </button>
                   <button onClick={() => handleDelete(k.id)}
                     style={{ fontSize: '11px', padding: '3px 8px', border: '1px solid #fecaca', borderRadius: '4px', background: '#fff', color: '#dc2626', cursor: 'pointer' }}>
-                    Delete
+                    {t.settings.deleteBtn}
                   </button>
                 </div>
               </div>
               <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px', fontFamily: 'monospace' }}>
-                Key: {maskKey(k.key)} · Model: {k.model} · T: {k.config.temperature} · Max Tokens: {k.config.maxTokens} · Thinking: {k.config.thinkingEnabled ? 'On' : 'Off'}
+                {t.settings.keyInfo
+                  .replace('{masked}', maskKey(k.key))
+                  .replace('{model}', k.model)
+                  .replace('{temp}', String(k.config.temperature))
+                  .replace('{maxTokens}', String(k.config.maxTokens))
+                  .replace('{thinking}', k.config.thinkingEnabled ? t.settings.thinkingOn : t.settings.thinkingOff)}
               </div>
               {k.errorMessage && (
                 <div style={{ fontSize: '11px', color: '#dc2626', marginTop: '4px' }}>{k.errorMessage}</div>
@@ -442,36 +447,36 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
           background: '#fafafe', marginBottom: '20px',
         }}>
           <h4 style={{ margin: '0 0 12px', fontSize: '14px' }}>
-            {editingKey ? 'Edit API Key' : 'Add API Key'}
+            {editingKey ? t.settings.editApiKey : t.settings.addApiKey}
           </h4>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <div>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Key Name</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t.settings.keyName}</label>
               <input
                 type="text" value={formName} onChange={e => setFormName(e.target.value)}
-                placeholder="e.g. My DeepSeek Key"
+                placeholder={t.settings.keyNamePlaceholder}
                 style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }}
               />
             </div>
             <div>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>API Key</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t.settings.apiKeyLabel}</label>
               <input
                 type="password" value={formKey} onChange={e => setFormKey(e.target.value)}
-                placeholder={editingKey ? 'Leave empty to keep current' : 'sk-...'}
+                placeholder={editingKey ? t.settings.apiKeyLeaveEmpty : t.settings.apiKeyPlaceholder}
                 style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }}
               />
             </div>
             <div>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Role</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t.settings.role}</label>
               <select value={formRole} onChange={e => setFormRole(e.target.value as 'manager' | 'worker')}
                 style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', background: '#fff' }}
               >
-                <option value="manager">Manager AI</option>
-                <option value="worker">Worker — Task Polling</option>
+                <option value="manager">{t.settings.roleManager}</option>
+                <option value="worker">{t.settings.roleWorkerPolling}</option>
               </select>
             </div>
             <div>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Model</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t.settings.model}</label>
               <select value={formModel} onChange={e => setFormModel(e.target.value)}
                 style={{ width: '100%', padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', background: '#fff' }}
               >
@@ -481,7 +486,7 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
               </select>
             </div>
             <div>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Temperature ({formTemp})</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t.settings.temperature.replace('{val}', String(formTemp))}</label>
               <input
                 type="range" min="0" max="2" step="0.1" value={formTemp}
                 onChange={e => setFormTemp(parseFloat(e.target.value))}
@@ -489,7 +494,7 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
               />
             </div>
             <div>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Max Tokens</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t.settings.maxTokens}</label>
               <input
                 type="number" min="256" max="8192" step="256" value={formMaxTokens}
                 onChange={e => setFormMaxTokens(parseInt(e.target.value) || 4096)}
@@ -501,17 +506,17 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
                 type="checkbox" checked={formThinking} onChange={e => setFormThinking(e.target.checked)}
                 style={{ width: '16px', height: '16px' }}
               />
-              <label style={{ fontSize: '12px', fontWeight: 500 }}>Enable Thinking</label>
+              <label style={{ fontSize: '12px', fontWeight: 500 }}>{t.settings.enableThinking}</label>
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px', marginTop: '14px', justifyContent: 'flex-end' }}>
             <button onClick={resetForm}
               style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #d1d5db', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: '12px' }}>
-              Cancel
+              {t.common.cancel}
             </button>
             <button onClick={editingKey ? handleUpdate : handleAdd}
               style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: '#4f46e5', color: '#fff', cursor: 'pointer', fontSize: '12px' }}>
-              {editingKey ? 'Update' : 'Add Key'}
+              {editingKey ? t.settings.updateBtn : t.settings.addKeyBtn}
             </button>
           </div>
         </div>
@@ -526,7 +531,7 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
         </h3>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
           <div>
-            <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Default Model</label>
+            <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t.settings.defaultModel}</label>
             <select
               value={config.settings.defaultModel}
               onChange={e => onConfigChange({ ...config, settings: { ...config.settings, defaultModel: e.target.value } })}
@@ -538,7 +543,7 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
             </select>
           </div>
           <div>
-            <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Default Temperature</label>
+            <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t.settings.defaultTemperature}</label>
             <input
               type="number" min="0" max="2" step="0.1" value={config.settings.defaultTemperature}
               onChange={e => onConfigChange({ ...config, settings: { ...config.settings, defaultTemperature: parseFloat(e.target.value) || 0.7 } })}
@@ -546,7 +551,7 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
             />
           </div>
           <div>
-            <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Default Max Tokens</label>
+            <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t.settings.defaultMaxTokens}</label>
             <input
               type="number" min="256" max="8192" step="256" value={config.settings.defaultMaxTokens}
               onChange={e => onConfigChange({ ...config, settings: { ...config.settings, defaultMaxTokens: parseInt(e.target.value) || 4096 } })}
@@ -554,7 +559,7 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
             />
           </div>
           <div>
-            <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Polling Interval (ms)</label>
+            <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t.settings.pollingInterval}</label>
             <input
               type="number" min="1000" max="60000" step="1000" value={config.settings.pollingIntervalMs}
               onChange={e => onConfigChange({ ...config, settings: { ...config.settings, pollingIntervalMs: parseInt(e.target.value) || 5000 } })}
@@ -562,7 +567,7 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
             />
           </div>
           <div>
-            <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Max Concurrent Tasks</label>
+            <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t.settings.maxConcurrentTasks}</label>
             <input
               type="number" min="1" max="10" value={config.settings.maxConcurrentTasks}
               onChange={e => onConfigChange({ ...config, settings: { ...config.settings, maxConcurrentTasks: parseInt(e.target.value) || 3 } })}
@@ -574,10 +579,10 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
         {/* Default Project Directory — 驾驭智能体创建新项目的默认位置 */}
         <div style={{ marginTop: '18px', paddingTop: '18px', borderTop: '1px solid #e5e7eb' }}>
           <label style={{ fontSize: '12px', fontWeight: 600, color: '#1f2937', display: 'block', marginBottom: '6px' }}>
-            Default Project Directory
+            {t.settings.defaultProjectDir}
           </label>
           <p style={{ margin: '0 0 10px', fontSize: '11px', color: '#6b7280', lineHeight: 1.5 }}>
-            When the Harness Agent creates a new project, it will create a folder here, add it to the farm, and start Claude Code to build the project from scratch.
+            {t.settings.defaultProjectDirDesc}
           </p>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div style={{
@@ -586,7 +591,7 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
               color: config.settings.defaultProjectDir ? '#1f2937' : '#9ca3af',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>
-              {config.settings.defaultProjectDir || 'Not set — choose a parent directory for new projects'}
+              {config.settings.defaultProjectDir || t.settings.defaultProjectDirPlaceholder}
             </div>
             <button
               onClick={async () => {
@@ -601,7 +606,7 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
                 fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap',
               }}
             >
-              Browse...
+              {t.common.browse}
             </button>
           </div>
         </div>
@@ -619,6 +624,7 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
 
 /** 中枢层设置：最小化到托盘 / 开机自启 / 热键 / 悬浮窗 */
 function HubSettingsSection() {
+  const { t } = useI18n()
   const [hubSettings, setHubSettings] = useState<{
     minimizeToTray: boolean
     autoStartEnabled: boolean
@@ -638,7 +644,7 @@ function HubSettingsSection() {
     setHubSettings({ ...hubSettings, [key]: value })
     const result = await window.electronAPI.updateHubSetting(key, value)
     if (result.success) {
-      setStatusMsg(`Applied: ${key}`)
+      setStatusMsg(t.settings.applied.replace('{key}', key))
       setTimeout(() => setStatusMsg(''), 2000)
     }
   }
@@ -648,10 +654,10 @@ function HubSettingsSection() {
   return (
     <div>
       <h3 style={{ margin: '0 0 12px', fontSize: '16px', color: '#1f2937', fontWeight: 600 }}>
-        Hub Settings
+        {t.settings.hubSettings}
       </h3>
       <p style={{ margin: '0 0 14px', fontSize: '12px', color: '#6b7280', lineHeight: 1.6 }}>
-        System-level behavior: tray, hotkeys, auto-start, and floating widget.
+        {t.settings.hubSettingsDesc}
       </p>
 
       <div style={{
@@ -664,8 +670,8 @@ function HubSettingsSection() {
           {/* Minimize to tray */}
           <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
             <div>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937' }}>Minimize to Tray</div>
-              <div style={{ fontSize: '11px', color: '#6b7280' }}>Close button hides window to system tray instead of quitting</div>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937' }}>{t.settings.minimizeToTray}</div>
+              <div style={{ fontSize: '11px', color: '#6b7280' }}>{t.settings.minimizeToTrayDesc}</div>
             </div>
             <input type="checkbox" checked={hubSettings.minimizeToTray}
               onChange={e => updateSetting('minimizeToTray', e.target.checked)}
@@ -675,8 +681,8 @@ function HubSettingsSection() {
           {/* Auto-start */}
           <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
             <div>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937' }}>Start on Boot</div>
-              <div style={{ fontSize: '11px', color: '#6b7280' }}>Automatically launch Claude Harness Desktop when you log in</div>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937' }}>{t.settings.startOnBoot}</div>
+              <div style={{ fontSize: '11px', color: '#6b7280' }}>{t.settings.startOnBootDesc}</div>
             </div>
             <input type="checkbox" checked={hubSettings.autoStartEnabled}
               onChange={e => updateSetting('autoStartEnabled', e.target.checked)}
@@ -685,8 +691,8 @@ function HubSettingsSection() {
 
           {/* Summon hotkey */}
           <div>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937', marginBottom: '4px' }}>Summon Hotkey</div>
-            <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '6px' }}>Global shortcut to show/hide the main window</div>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937', marginBottom: '4px' }}>{t.settings.summonHotkey}</div>
+            <div style={{ fontSize: '11px', color: '#6b7280', marginBottom: '6px' }}>{t.settings.summonHotkeyDesc}</div>
             <input
               type="text"
               value={hubSettings.summonHotkey}
@@ -697,7 +703,7 @@ function HubSettingsSection() {
               onKeyDown={e => {
                 if (e.key === 'Enter') updateSetting('summonHotkey', hubSettings.summonHotkey)
               }}
-              placeholder="Ctrl+Shift+H"
+              placeholder={t.settings.summonHotkeyPlaceholder}
               style={{
                 padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: '6px',
                 fontSize: '13px', fontFamily: 'monospace', width: '180px',
@@ -708,8 +714,8 @@ function HubSettingsSection() {
           {/* Floating widget */}
           <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
             <div>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937' }}>Floating Widget</div>
-              <div style={{ fontSize: '11px', color: '#6b7280' }}>Show a compact always-on-top quick access panel</div>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: '#1f2937' }}>{t.settings.floatingWidget}</div>
+              <div style={{ fontSize: '11px', color: '#6b7280' }}>{t.settings.floatingWidgetDesc}</div>
             </div>
             <input type="checkbox" checked={hubSettings.floatingWidgetEnabled}
               onChange={e => updateSetting('floatingWidgetEnabled', e.target.checked)}

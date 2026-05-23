@@ -303,7 +303,7 @@ export default function HorseFarm() {
                 background: showCommandPalette ? '#6366f122' : 'transparent',
                 color: '#6366f1', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
               }}
-            >⚡ 快捷命令</button>
+            >⚡ {t.horseFarm.headerQuickCommand}</button>
           )}
           <button onClick={() => setDetailPanel(prev => prev.type === 'identity' ? { type: null, projectPath: null } : { type: 'identity', projectPath: null })}
             style={{
@@ -325,35 +325,35 @@ export default function HorseFarm() {
               background: detailPanel.type === 'workflow' ? '#8b5cf622' : 'transparent',
               color: detailPanel.type === 'workflow' ? '#8b5cf6' : '#888',
               cursor: 'pointer', fontSize: '12px',
-            }}>Workflow</button>
+            }}>{t.horseFarm.headerWorkflow}</button>
           <button onClick={() => setDetailPanel(prev => prev.type === 'plugins' ? { type: null, projectPath: null } : { type: 'plugins', projectPath: null })}
             style={{
               padding: '4px 10px', borderRadius: '6px', border: '1px solid #444',
               background: detailPanel.type === 'plugins' ? '#f59e0b22' : 'transparent',
               color: detailPanel.type === 'plugins' ? '#f59e0b' : '#888',
               cursor: 'pointer', fontSize: '12px',
-            }}>Plugins</button>
+            }}>{t.horseFarm.headerPlugins}</button>
           <button onClick={() => setDetailPanel(prev => prev.type === 'eco' ? { type: null, projectPath: null } : { type: 'eco', projectPath: null, ecoSubTab: 'resources' })}
             style={{
               padding: '4px 10px', borderRadius: '6px', border: '1px solid #444',
               background: detailPanel.type === 'eco' ? '#06b6d422' : 'transparent',
               color: detailPanel.type === 'eco' ? '#06b6d4' : '#888',
               cursor: 'pointer', fontSize: '12px',
-            }}>Eco</button>
+            }}>{t.horseFarm.headerEco}</button>
           <button onClick={() => setDetailPanel(prev => prev.type === 'token' ? { type: null, projectPath: null } : { type: 'token', projectPath: null })}
             style={{
               padding: '4px 10px', borderRadius: '6px', border: '1px solid #444',
               background: detailPanel.type === 'token' ? '#f59e0b22' : 'transparent',
               color: detailPanel.type === 'token' ? '#f59e0b' : '#888',
               cursor: 'pointer', fontSize: '12px',
-            }}>📊 Tokens</button>
+            }}>{t.horseFarm.headerTokens}</button>
           <button onClick={() => setDetailPanel(prev => prev.type === 'system' ? { type: null, projectPath: null } : { type: 'system', projectPath: null, systemSubTab: 'rules' })}
             style={{
               padding: '4px 10px', borderRadius: '6px', border: '1px solid #444',
               background: detailPanel.type === 'system' ? '#ef444422' : 'transparent',
               color: detailPanel.type === 'system' ? '#ef4444' : '#888',
               cursor: 'pointer', fontSize: '12px',
-            }}>System</button>
+            }}>{t.horseFarm.headerSystem}</button>
           {initializing && (
             <span style={{ fontSize: '12px', color: '#7c3aed', fontWeight: 500 }}>
               {initDone}/{initTotal}
