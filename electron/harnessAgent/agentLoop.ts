@@ -15,6 +15,8 @@ import { buildContext } from './contextPipeline.js'
 import { SemanticMemory } from './semanticMemory.js'
 import { DecisionTracer } from './decisionTracer.js'
 import { HITLManager } from './hitlManager.js'
+import { RoleManager } from './roleManager.js'
+import { DocToSkillLoader } from './docToSkill.js'
 
 // ---- DeepSeek API 调用（主进程版本）----
 
@@ -97,6 +99,8 @@ export class AgentLoop {
   private semanticMemory: SemanticMemory
   private tracer: DecisionTracer
   private hitl: HITLManager
+  private roleManager: RoleManager
+  private docToSkill: DocToSkillLoader
 
   constructor(ctx: AgentContext, pm: PermissionManager, conversationHistory?: ConversationTurn[]) {
     this.ctx = ctx
@@ -111,6 +115,8 @@ export class AgentLoop {
     if (ctx.permissions && (ctx.permissions as any).enableHITL) {
       this.hitl.setEnabled(true)
     }
+    this.roleManager = new RoleManager()
+    this.docToSkill = new DocToSkillLoader()
 
     // 注入跨轮次对话历史（保留上下文记忆）
     if (conversationHistory && conversationHistory.length > 0) {
@@ -157,6 +163,16 @@ export class AgentLoop {
 
     // V3: 记录用户消息到热记忆
     this.memory.recordEvent('user', userMessage)
+
+    // V3: 角色自动检测（如果开启了角色系统）
+    if (this.ctx.currentRole === undefined || (this.ctx.permissions as any)?.enableRoleSystem) {
+      const roleResult = this.roleManager.autoSwitch(userMessage)
+      if (roleResult.switched) {
+        this.ctx.currentRole = roleResult.roleId
+        this.tracer.startSpan('role_switch', { fromRole: 'previous', toRole: roleResult.roleId, reason: roleResult.reason })
+        onEvent({ type: 'text_delta', content: `\n🎭 角色切换: ${roleResult.roleId} (${roleResult.reason})` })
+      }
+    }
 
     // V3: 通过六步 Processor Pipeline 构建系统提示词
     const systemPrompt = await buildContext(this.ctx, this.tokenBudgeter)
@@ -1142,6 +1158,16 @@ ${pluginSection}
   /** V3: 获取决策摘要（注入到 LLM 上下文） */
   getDecisionSummary(): string {
     return this.tracer.getDecisionSummary()
+  }
+
+  /** V3: 获取角色管理器 */
+  getRoleManager(): RoleManager {
+    return this.roleManager
+  }
+
+  /** V3: 获取 Doc-to-Skill 加载器 */
+  getDocToSkill(): DocToSkillLoader {
+    return this.docToSkill
   }
 
   private waitForPermission(): Promise<'allow' | 'deny' | 'allow_once'> {

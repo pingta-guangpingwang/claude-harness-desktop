@@ -110,31 +110,43 @@ export const ContextSelectorProcessor: ContextProcessor = (view, _ctx) => {
   return view
 }
 
-// ---- Step 4: KnowledgeInjector — 知识库搜索 + 错误模式匹配 ----
+// ---- Step 4: KnowledgeInjector — 知识库搜索 + 错误模式匹配 + Doc-to-Skill ----
 
 export const KnowledgeInjectorProcessor: ContextProcessor = (view, ctx) => {
-  // 搜索知识库（基于当前项目状态）
-  const allProjects = ctx.projectIds.map(id => {
-    const name = ctx.projectNames.get(id) || id.split('\\').pop() || id
-    const online = ctx.onlineProjects.has(id)
-    return `${name}: ${online ? '在线' : '离线'}`
-  }).join(', ')
+  const parts: string[] = []
 
-  // 检查是否有离线项目 — 触发知识库搜索
+  // 搜索知识库（基于当前项目状态）
   const offlineCount = ctx.projectIds.filter(id => !ctx.onlineProjects.has(id)).length
   if (offlineCount > 0) {
     const kbResult = searchKnowledge('offline 离线 配置 api')
     if (kbResult.summary.length > 50) {
-      view.knowledge = `[知识库匹配 — ${offlineCount} 个项目离线]\n${kbResult.summary.slice(0, 800)}`
+      parts.push(`[知识库匹配 — ${offlineCount} 个项目离线]\n${kbResult.summary.slice(0, 800)}`)
     }
   }
 
   // 搜索 API 配置知识（每次注入，以防配置问题）
-  const apiKb = searchKnowledge('deepseek api config settings')
-  if (apiKb.summary.length > 50 && view.knowledge.length < 500) {
-    view.knowledge += '\n' + apiKb.summary.slice(0, 500)
+  if (parts.length < 2) {
+    const apiKb = searchKnowledge('deepseek api config settings')
+    if (apiKb.summary.length > 50) {
+      parts.push(apiKb.summary.slice(0, 500))
+    }
   }
 
+  // 角色感知知识注入
+  const roleId = ctx.currentRole || 'ceo'
+  if (roleId === 'diagnostician') {
+    const diagKb = searchKnowledge('error 错误 诊断 修复')
+    if (diagKb.summary.length > 50) {
+      parts.push(`[诊断角色知识]\n${diagKb.summary.slice(0, 400)}`)
+    }
+  } else if (roleId === 'reviewer') {
+    const reviewKb = searchKnowledge('lint typecheck audit quality')
+    if (reviewKb.summary.length > 50) {
+      parts.push(`[审查角色知识]\n${reviewKb.summary.slice(0, 400)}`)
+    }
+  }
+
+  view.knowledge = parts.join('\n\n')
   view.estimatedTokens += estimateTokens(view.knowledge)
   return view
 }
