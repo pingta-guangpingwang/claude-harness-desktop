@@ -10,6 +10,7 @@ import { buildReflectionPrompt, parseReflectionOutput, formatReflectionForLLM, t
 import { getActiveProjectTasks } from './tools.js'
 import { MemoryManager } from './memoryStore.js'
 import { TokenBudgeter, estimateTokens, estimateMessagesTokens } from './tokenBudget.js'
+import { detectProvider, type LLMProvider } from './llmProviders.js'
 
 // ---- DeepSeek API 调用（主进程版本）----
 
@@ -50,8 +51,10 @@ export interface ConversationTurn {
   content: string
 }
 
-const OPENAI_ENDPOINT = 'https://api.deepseek.com/v1/chat/completions'
-const ANTHROPIC_ENDPOINT = 'https://api.deepseek.com/anthropic/v1/messages'
+// V3: Provider 抽象 — 不再硬编码 endpoint
+function getProvider(model: string, explicitProviderId?: string): LLMProvider {
+  return detectProvider(model, explicitProviderId)
+}
 
 /** fetch 带超时的包装器 — 超时抛 AbortError，不残留定时器 */
 async function fetchWithTimeout(
@@ -472,9 +475,10 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
     ]
 
     try {
-      const isClaude = this.ctx.model.startsWith('claude-')
+      const provider = getProvider(this.ctx.model)
+      const isAnthropic = provider.format === 'anthropic'
 
-      const body = isClaude
+      const body = isAnthropic
         ? {
             model: this.ctx.model,
             max_tokens: 300,
@@ -490,10 +494,8 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
             stream: false,
           }
 
-      const endpoint = isClaude ? ANTHROPIC_ENDPOINT : OPENAI_ENDPOINT
-      const headers: Record<string, string> = isClaude
-        ? { 'Content-Type': 'application/json', 'x-api-key': this.ctx.apiKey, 'anthropic-version': '2023-06-01' }
-        : { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.ctx.apiKey}` }
+      const endpoint = isAnthropic ? (provider.messagesEndpoint || provider.chatEndpoint) : provider.chatEndpoint
+      const headers = provider.buildHeaders(this.ctx.apiKey)
 
       // 8 秒超时：Reflection 快了有用、慢了拖后腿，超时直接放弃
       const res = await fetchWithTimeout(endpoint, {
@@ -505,7 +507,7 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
 
       if (!res || !res.ok) return null
       const data = await res.json() as any
-      const raw = isClaude ? (data.content?.[0]?.text || '') : (data.choices?.[0]?.message?.content || '')
+      const raw = isAnthropic ? (data.content?.[0]?.text || '') : (data.choices?.[0]?.message?.content || '')
       return parseReflectionOutput(raw)
     } catch {
       return null
@@ -523,9 +525,10 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
     // 使用 OpenAI 兼容格式（支持 tool calling）
     const tools = getToolDeclarations()
 
-    const isClaude = this.ctx.model.startsWith('claude-')
+    const provider = getProvider(this.ctx.model)
+    const isAnthropic = provider.format === 'anthropic'
 
-    if (isClaude) {
+    if (isAnthropic) {
       // Anthropic Messages API — 完整支持 streaming tool_use
       const systemMsg = this.messages.find(m => m.role === 'system')
       const nonSystemMsgs = this.messages.filter(m => m.role !== 'system')
@@ -574,13 +577,10 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
       }
       if (anthropicTools.length > 0) body.tools = anthropicTools
 
-      const res = await fetch(ANTHROPIC_ENDPOINT, {
+      const endpoint = provider.messagesEndpoint || provider.chatEndpoint
+      const res = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.ctx.apiKey,
-          'anthropic-version': '2023-06-01',
-        },
+        headers: provider.buildHeaders(this.ctx.apiKey),
         body: JSON.stringify(body),
         signal,
       })
@@ -683,12 +683,9 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
       stream: true,
     }
 
-    const res = await fetch(OPENAI_ENDPOINT, {
+    const res = await fetch(provider.chatEndpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.ctx.apiKey}`,
-      },
+      headers: provider.buildHeaders(this.ctx.apiKey),
       body: JSON.stringify(body),
       signal,
     })
