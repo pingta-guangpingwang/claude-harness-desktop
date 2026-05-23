@@ -61,6 +61,7 @@ const THINKING_PATTERNS: [RegExp, string][] = [
   [/crunch/i, 'Crunched...'],
   [/wibbl/i, 'Wibbling...'],
   [/boogie/i, 'Boogieing...'],
+  [/frost/i, 'Frosting...'],
   [/orchestrat/i, 'Orchestrating...'],
   [/almost done/i, 'Almost done...'],
   [/think/i, 'Thinking...'],
@@ -132,8 +133,8 @@ function extractThinkingStatus(text: string): string | null {
     .replace(/[▐▌▛▜▟▙▘▝▀▄█▊▎▌▏▍▋│├┤┼╺╍┄┅┈┉]/g, '')
     .trim()
   if (!stripped) return null
-  // 检测 spinner 字符 + 状态词
-  if (/[⏳✻✽✢✶✹✺✼✾·•]/.test(stripped)) {
+  // 检测 spinner 字符 + 状态词（含 Claude Code v2 新 spinner ● 🧠）
+  if (/[⏳✻✽✢✶✹✺✼✾·•●🧠]/.test(stripped)) {
     for (const [re, label] of THINKING_PATTERNS) {
       if (re.test(stripped)) return label
     }
@@ -174,8 +175,8 @@ function cleanPtyChunk(text: string): string[] {
   for (const line of out.split('\n')) {
     const t = line.replace(/\x1b\[[0-9;]*m/g, '').trim()
     if (!t) continue
-    // spinner + 状态动词
-    if (/^[⏳✻✽✢✶✹✺✼✾·•*]\s*(Scurrying|Simmering|Brewed|Crunched|Wibbling|Boogieing|Orchestrat|Dilly-dallying|Sautéed|Tempering|Puttering|Churned|thinking|Loading|Working|Doing|Crafting|Deciphering|Spelunking|Architecting|Actualizing|almost done)/i.test(t)) continue
+    // spinner + 状态动词（● = Claude Code v2 新 spinner, 🧠 = 思考状态）
+    if (/^[⏳✻✽✢✶✹✺✼✾·•*●🧠]\s*(Scurrying|Simmering|Brewed|Crunched|Wibbling|Boogieing|Orchestrat|Dilly-dallying|Sautéed|Tempering|Puttering|Churned|Frosting|thinking|Loading|Working|Doing|Crafting|Deciphering|Spelunking|Architecting|Actualizing|almost done)/i.test(t)) continue
     // 分隔线
     if (/^[-━─=–—]{6,}$/.test(t)) continue
     // 快捷提示/横幅
@@ -210,6 +211,20 @@ function cleanPtyChunk(text: string): string[] {
     if (/^●\s*high\s*·\s*\/effort/i.test(t)) continue
     // 纯 TUI 框线
     if (/^[+|\-]{3,}\s*$/i.test(t) && t.length < 60) continue
+    // Claude Code v2 状态栏残片
+    if (/^(acceptedits|edits)\s*(on|off)/i.test(t)) continue
+    if (/esc\s*to\s*interrupt/i.test(t)) continue
+    if (/↓\s*to\s*manage/i.test(t)) continue
+    if (/Running in the background/i.test(t)) continue
+    if (/ctrl\+[obcr]\s*(to|for)/i.test(t)) continue
+    // token/时间 状态行
+    if (/[↑↓]\s*[\d.]+[km]?\s*tokens?/i.test(t)) continue
+    if (/thought\s*for\s*\d+s/i.test(t)) continue
+    if (/timeout\s*\d+m?\)/i.test(t)) continue
+    // 🧠 状态行（剩余）
+    if (/^🧠\s*(Working|Almost done|Done)/i.test(t)) continue
+    // ● spinner 独立行
+    if (/^●\s*\w+…/i.test(t) && t.length < 40) continue
     filtered.push(line)
   }
 
