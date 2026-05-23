@@ -13,6 +13,8 @@ import { TokenBudgeter, estimateTokens, estimateMessagesTokens } from './tokenBu
 import { detectProvider, type LLMProvider } from './llmProviders.js'
 import { buildContext } from './contextPipeline.js'
 import { SemanticMemory } from './semanticMemory.js'
+import { DecisionTracer } from './decisionTracer.js'
+import { HITLManager } from './hitlManager.js'
 
 // ---- DeepSeek API 调用（主进程版本）----
 
@@ -93,6 +95,8 @@ export class AgentLoop {
   private memory: MemoryManager = new MemoryManager()
   private tokenBudgeter: TokenBudgeter
   private semanticMemory: SemanticMemory
+  private tracer: DecisionTracer
+  private hitl: HITLManager
 
   constructor(ctx: AgentContext, pm: PermissionManager, conversationHistory?: ConversationTurn[]) {
     this.ctx = ctx
@@ -100,6 +104,13 @@ export class AgentLoop {
     this.conversationId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
     this.tokenBudgeter = new TokenBudgeter(ctx.model)
     this.semanticMemory = new SemanticMemory(this.memory.cold, ctx.apiKey)
+    this.tracer = new DecisionTracer(this.conversationId)
+    this.hitl = new HITLManager()
+
+    // 默认关闭 HITL（向后兼容），可通过 ctx.permissions 开启
+    if (ctx.permissions && (ctx.permissions as any).enableHITL) {
+      this.hitl.setEnabled(true)
+    }
 
     // 注入跨轮次对话历史（保留上下文记忆）
     if (conversationHistory && conversationHistory.length > 0) {
@@ -183,7 +194,11 @@ export class AgentLoop {
         if (signal.aborted) break
       }
 
-      // 调用 LLM（捕获中断信号 + 网络瞬断重试，避免 AbortError/TypeError 泄漏到前端显示）
+      // V3: 追踪 LLM 调用
+      const llmSpanId = this.tracer.startSpan('llm_call', {
+        messageCount: this.messages.length,
+        estimatedTokens: estimateMessagesTokens(this.messages),
+      })（捕获中断信号 + 网络瞬断重试，避免 AbortError/TypeError 泄漏到前端显示）
       let response: Awaited<ReturnType<typeof this.callLLMStream>>
       let lastError: any = null
       let llmSuccess = false
@@ -247,6 +262,13 @@ export class AgentLoop {
           onEvent({ type: 'text_delta', content: `\n📊 ${report}` })
         }
       }
+
+      // V3: 结束 LLM span
+      this.tracer.endSpan(llmSpanId, {
+        toolCalls: response.choices?.[0]?.message?.tool_calls?.map(tc => tc.function.name) || [],
+        hasContent: !!response.choices?.[0]?.message?.content,
+        tokensUsed: response.usage?.total_tokens || 0,
+      })
 
       if (signal.aborted) break
 
@@ -340,6 +362,9 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
 
         onEvent({ type: 'tool_call', id: tc.id, name: tc.name, params: tc.arguments })
 
+        // V3: 追踪工具执行
+        const toolSpanId = this.tracer.startSpan('tool_exec', { toolName: tc.name, args: JSON.stringify(tc.arguments).slice(0, 200) })
+
         // 权限检查（多层管道）
         const tool = getTool(tc.name)
         const perm = tool
@@ -361,6 +386,20 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
           }
         }
 
+        // V3: HITL 动态确认
+        const hitlDecision = this.hitl.shouldPauseForConfirmation(tc, null)
+        if (hitlDecision.pause && this.hitl.isEnabled) {
+          onEvent({ type: 'permission_needed', id: tc.id, name: tc.name, params: tc.arguments, reason: hitlDecision.reason || '需要确认' })
+          const hitlResponse = await this.hitl.requestConfirmation(tc, hitlDecision.reason || '')
+          if (hitlResponse === 'denied' || hitlResponse === 'timeout') {
+            onEvent({ type: 'tool_error', id: tc.id, name: tc.name, error: hitlResponse === 'timeout' ? '确认超时(120s)' : '用户拒绝' })
+            toolResults.push({ id: tc.id, name: tc.name, output: hitlResponse === 'timeout' ? '确认超时' : '用户拒绝' })
+            this.tracer.endSpan(toolSpanId, {}, 'HITL denied/timeout')
+            this.hitl.recordResult(tc.name, false)
+            continue
+          }
+        }
+
         // 执行
         this.permissionManager.recordAllow(tc.name)
         const result = await executeTool(tc.name, tc.arguments, this.ctx)
@@ -370,6 +409,13 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
           onEvent({ type: 'tool_error', id: tc.id, name: tc.name, error: result.output })
         }
         toolResults.push({ id: tc.id, name: tc.name, output: result.output })
+
+        // V3: 记录工具结果 + 结束 trace span
+        this.hitl.recordResult(tc.name, result.success)
+        this.tracer.endSpan(toolSpanId, {
+          success: result.success,
+          outputLen: result.output.length,
+        }, result.success ? undefined : result.output.slice(0, 100))
       }
 
       // 工具执行完后检查是否被中断（长时间工具如 wake_projects 可能被用户打断）
@@ -1081,6 +1127,21 @@ ${pluginSection}
   /** V3: 记录到语义记忆 */
   async recordToSemanticMemory(entry: Parameters<SemanticMemory['record']>[0]) {
     return this.semanticMemory.record(entry)
+  }
+
+  /** V3: 获取决策追踪器 */
+  getTracer(): DecisionTracer {
+    return this.tracer
+  }
+
+  /** V3: 获取 HITL 管理器 */
+  getHITL(): HITLManager {
+    return this.hitl
+  }
+
+  /** V3: 获取决策摘要（注入到 LLM 上下文） */
+  getDecisionSummary(): string {
+    return this.tracer.getDecisionSummary()
   }
 
   private waitForPermission(): Promise<'allow' | 'deny' | 'allow_once'> {
