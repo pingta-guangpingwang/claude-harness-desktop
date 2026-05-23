@@ -50,7 +50,7 @@ function saveConversationMemory(): void {
   }
 }
 
-export function registerHarnessIpc(window: BrowserWindow) {
+export async function registerHarnessIpc(window: BrowserWindow) {
   mainWindow = window
   setNotifierWindow(window)
 

@@ -140,6 +140,12 @@ class RoleConfigStore {
     }
   }
 
+  /** 重置为默认配置（测试用） */
+  reset(): void {
+    this.data = { ...DEFAULTS, updatedAt: new Date().toISOString() }
+    this.save()
+  }
+
   private save(): void {
     try {
       this.data.updatedAt = new Date().toISOString()

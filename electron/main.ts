@@ -41,7 +41,7 @@ async function initializeApp() {
   mainWindow = windowManager.createMainWindow()
 
   // 2. 注册所有 IPC 处理器
-  registerAllHandlers()
+  await registerAllHandlers()
 
   // 3. 加载中枢设置并初始化托盘/热键/自启
   await initHubLayer()
@@ -50,7 +50,7 @@ async function initializeApp() {
   await startMiddlewareBox()
 }
 
-function registerAllHandlers() {
+async function registerAllHandlers() {
   Menu.setApplicationMenu(null)
   registerDbhtIpc(mainWindow)
   registerHorseFarmIpc()
@@ -59,7 +59,7 @@ function registerAllHandlers() {
   registerHubSettingsIpc()
   registerPtyIpc(mainWindow!)
   registerSessionIpc()
-  registerHarnessIpc(mainWindow!)
+  await registerHarnessIpc(mainWindow!)
   registerCliIpc(mainWindow!)
   registerPluginIpc(mainWindow!)
   registerWorkflowIpc(mainWindow!)

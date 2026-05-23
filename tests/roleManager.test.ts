@@ -1,6 +1,7 @@
 // RoleManager + DocToSkillLoader 单元测试
 
 import { RoleManager, BUILTIN_ROLES } from '../electron/harnessAgent/roleManager'
+import { roleConfigStore } from '../electron/harnessAgent/roleConfigStore'
 
 describe('BUILTIN_ROLES', () => {
   test('有 4 个内置角色', () => {
@@ -37,6 +38,7 @@ describe('RoleManager', () => {
   let rm: RoleManager
 
   beforeEach(() => {
+    roleConfigStore.reset()
     rm = new RoleManager()
   })
 
@@ -104,6 +106,7 @@ describe('RoleManager.inferRole', () => {
   let rm: RoleManager
 
   beforeEach(() => {
+    roleConfigStore.reset()
     rm = new RoleManager()
   })
 
@@ -148,6 +151,7 @@ describe('RoleManager.autoSwitch', () => {
   let rm: RoleManager
 
   beforeEach(() => {
+    roleConfigStore.reset()
     rm = new RoleManager()
   })
 

@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron';
-export declare function registerHarnessIpc(window: BrowserWindow): void;
+export declare function registerHarnessIpc(window: BrowserWindow): Promise<void>;
 /** 桥接 CLI 命令到 Agent 工具池 — 由 main.ts 在两者初始化完毕后调用 */
 export declare function bridgeCliToAgent(cliRegistry: {
     getAll: () => Array<{
