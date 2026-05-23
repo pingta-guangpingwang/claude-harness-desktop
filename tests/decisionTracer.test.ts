@@ -95,10 +95,12 @@ describe('HITLManager', () => {
 
   beforeEach(() => {
     hitl = new HITLManager(5000) // 短超时方便测试
+    hitl.setEnabled(true) // V3.8: 默认关闭，测试中手动开启
   })
 
-  test('默认启用', () => {
-    expect(hitl.isEnabled).toBe(true)
+  test('默认关闭', () => {
+    const h = new HITLManager()
+    expect(h.isEnabled).toBe(false)
   })
 
   test('低置信度 → 暂停', () => {

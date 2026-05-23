@@ -424,6 +424,20 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
           }
         }
 
+        // V3: broadcast / stop_all 精准确认（即使信任模式也需确认 — 影响所有项目）
+        if (tc.name === 'broadcast' || tc.name === 'stop_all') {
+          const reason = tc.name === 'broadcast'
+            ? 'broadcast 将向所有在线项目发送指令，可能打断正在执行的任务'
+            : 'stop_all 将终止所有项目的 AI 任务，不可恢复'
+          onEvent({ type: 'permission_needed', id: tc.id, name: tc.name, params: tc.arguments, reason })
+          const decision = await this.waitForPermission()
+          if (decision === 'deny') {
+            onEvent({ type: 'tool_error', id: tc.id, name: tc.name, error: '用户拒绝执行（全局影响性操作）' })
+            toolResults.push({ id: tc.id, name: tc.name, output: '用户拒绝执行：影响所有项目的操作需确认' })
+            continue
+          }
+        }
+
         // V3: HITL 动态确认（信任模式下跳过 — 驾驭智能体自主决策，无需用户授权）
         const hitlDecision = this.hitl.shouldPauseForConfirmation(tc, null)
         const isTrustMode = this.permissionManager.getPermissions().autoTrustConfirm
