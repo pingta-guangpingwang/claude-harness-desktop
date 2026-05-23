@@ -8,6 +8,8 @@ import { taskQueue } from './taskQueue.js'
 import { getTokenStore } from '../modules/tokenStore.js'
 import { buildReflectionPrompt, parseReflectionOutput, formatReflectionForLLM, type ReflectionResult } from './reflector.js'
 import { getActiveProjectTasks } from './tools.js'
+import { MemoryManager } from './memoryStore.js'
+import { TokenBudgeter, estimateTokens, estimateMessagesTokens } from './tokenBudget.js'
 
 // ---- DeepSeek API 调用（主进程版本）----
 
@@ -80,16 +82,23 @@ export class AgentLoop {
   } | null = null
   private eventCallback: ((event: AgentEvent) => void) | null = null
   readonly conversationId: string
+  private roundIndex = 0
+
+  // V3: 记忆存储 + Token 预算
+  private memory: MemoryManager = new MemoryManager()
+  private tokenBudgeter: TokenBudgeter
 
   constructor(ctx: AgentContext, pm: PermissionManager, conversationHistory?: ConversationTurn[]) {
     this.ctx = ctx
     this.permissionManager = pm
     this.conversationId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+    this.tokenBudgeter = new TokenBudgeter(ctx.model)
 
     // 注入跨轮次对话历史（保留上下文记忆）
     if (conversationHistory && conversationHistory.length > 0) {
       for (const turn of conversationHistory) {
         this.messages.push({ role: turn.role, content: turn.content })
+        this.memory.recordEvent(turn.role, turn.content)
       }
     }
   }
@@ -128,6 +137,9 @@ export class AgentLoop {
 
     onEvent({ type: 'thinking_start' })
 
+    // V3: 记录用户消息到热记忆
+    this.memory.recordEvent('user', userMessage)
+
     // 构建消息：保留历史对话 + 系统提示 + 当前用户消息
     this.messages = [
       ...this.messages,
@@ -160,9 +172,6 @@ export class AgentLoop {
       if (!pending || pending.length === 0) {
         if (signal.aborted) break
       }
-
-      // 内存压力检查：估计 token 用量，超过 80% 时触发激进清理
-      this.checkMemoryPressure()
 
       // 调用 LLM（捕获中断信号 + 网络瞬断重试，避免 AbortError/TypeError 泄漏到前端显示）
       let response: Awaited<ReturnType<typeof this.callLLMStream>>
@@ -202,6 +211,14 @@ export class AgentLoop {
 
       // 记录 token 消耗
       if (response.usage) {
+        // V3: 喂给 TokenBudgeter 做闭环追踪
+        this.tokenBudgeter.recordRoundUsage(
+          response.usage.prompt_tokens,
+          response.usage.completion_tokens,
+          this.roundIndex,
+        )
+        this.roundIndex++
+
         try {
           getTokenStore().record({
             projectPath: 'harness-agent',
@@ -213,6 +230,12 @@ export class AgentLoop {
             conversationId: this.conversationId,
           })
         } catch { /* token 记录失败不阻塞主循环 */ }
+
+        // V3: 每 5 轮汇报一次 token 利用率
+        if (this.roundIndex % 5 === 0) {
+          const report = this.tokenBudgeter.getUtilizationReport()
+          onEvent({ type: 'text_delta', content: `\n📊 ${report}` })
+        }
       }
 
       if (signal.aborted) break
@@ -360,15 +383,18 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
       this.messages.push(assistantMsg)
 
       for (const tr of toolResults) {
+        const summarized = this.summarizeToolResult(tr.name, tr.output)
         this.messages.push({
           role: 'tool',
-          content: this.summarizeToolResult(tr.name, tr.output),
+          content: summarized,
           tool_call_id: tr.id,
         })
+        // V3: 记录工具结果到热记忆
+        this.memory.recordEvent('tool', summarized, tr.name)
       }
 
-      // A2: 对话历史智能压缩 — messages > 24 条时压缩早期轮次
-      this.compressHistory()
+      // V3: Token 预算驱动的智能压缩（替代旧的无脑截断）
+      this.smartCompress()
 
       // A3: Reflection 反思步骤 — 工具执行后、下一轮决策前，轻量级结构化反思
       if (toolCalls.length > 0 && toolResults.length > 0 && !signal.aborted) {
@@ -938,26 +964,37 @@ ${pluginSection}
     return `${summary}\n（原始输出 ${output.length} 字符，已提取 ${keyLines.length} 条关键行）`
   }
 
-  private compressHistory(): void {
-    const MAX_MSG = 50
-    if (this.messages.length <= MAX_MSG) return
+  /**
+   * V3: Token 预算驱动的智能压缩
+   * 替代旧的一刀切 3 轮截断 + 1M token 粗暴阈值
+   *
+   * 核心原则：默认全量保留。只在 TokenBudgeter 检测到接近窗口上限（>80%）时才触发温记忆摘要。
+   * 对于典型用户场景（20-30 轮），完全不触发摘要，全程全量记忆。
+   */
+  private smartCompress(): void {
+    const totalTokens = estimateMessagesTokens(this.messages)
+    const maxTokens = this.tokenBudgeter.getProviderCapabilities(this.ctx.model).maxContextTokens
+    const safeThreshold = Math.floor(maxTokens * 0.8)
 
+    if (totalTokens <= safeThreshold) return // 远未到阈值，全量保留
+
+    console.log(`[Agent] ⚠️ Token 预算触发: ${(totalTokens / 1000).toFixed(0)}K/${(maxTokens / 1000).toFixed(0)}K (${((totalTokens / maxTokens) * 100).toFixed(1)}%)，执行智能压缩`)
+
+    // 找到 system 消息和最近 4 个完整轮次
     const sysIdx = this.messages.findIndex(m => m.role === 'system')
-
-    // 保留最近 3 个完整轮次（assistant tool_calls + 对应的 tool results）
     let assistantCount = 0
     let cutoffIdx = this.messages.length
     for (let i = this.messages.length - 1; i >= 0; i--) {
       if (this.messages[i].role === 'assistant' && this.messages[i].tool_calls?.length) {
         assistantCount++
-        if (assistantCount >= 3) { cutoffIdx = i; break }
+        if (assistantCount >= 4) { cutoffIdx = i; break }
       }
     }
 
     const toCompress = this.messages.slice(sysIdx + 1, cutoffIdx)
     if (toCompress.length <= 4) return
 
-    // 结构化提取：操作了哪些项目 + 关键发现 + 进行中的任务
+    // 结构化提取：操作的项目 + 关键发现 + 活跃工具
     const projectActions = new Map<string, string[]>()
     const keyFindings: string[] = []
     const activeToolNames = new Set<string>()
@@ -969,7 +1006,6 @@ ${pluginSection}
         }
       }
       if (msg.role === 'tool' && msg.content.length > 20) {
-        // 提取关键行（不只是首行，而是所有包含状态信号的行）
         const keyLines = msg.content.split('\n').filter(l =>
           /✅|❌|⚠️|失败|成功|错误|在线|离线|阻塞|完成|📊|🟢|🔴|🟡|⏳|✻|🧠/.test(l)
         )
@@ -981,7 +1017,6 @@ ${pluginSection}
           keyFindings.push(extracted)
         }
 
-        // 按项目归类
         for (const [id, name] of this.ctx.projectNames) {
           if (msg.content.includes(id) || msg.content.includes(name)) {
             const actions = projectActions.get(id) || []
@@ -992,8 +1027,7 @@ ${pluginSection}
       }
     }
 
-    // 构建结构化摘要
-    const parts: string[] = [`[上下文摘要 — 压缩了 ${toCompress.length} 条早期消息，保留最近 3 轮完整对话]`]
+    const parts: string[] = [`[Token预算压缩 — 压缩了 ${toCompress.length} 条早期消息，保留最近 4 轮完整对话。当前上下文利用率: ${((totalTokens / maxTokens) * 100).toFixed(0)}%]`]
     if (activeToolNames.size > 0) {
       parts.push(`已调用工具: ${[...activeToolNames].join(', ')}`)
     }
@@ -1014,79 +1048,25 @@ ${pluginSection}
       { role: 'user' as const, content: parts.join('\n') },
       ...this.messages.slice(cutoffIdx),
     ]
+
+    // V3: 将被压缩的事件范围记录到温记忆（异步 LLM 摘要稍后由 Summarizer 完成）
+    this.memory.warm.addSummary({
+      eventRange: [0, cutoffIdx],
+      summary: parts.join('\n'),
+      keyFacts: keyFindings.slice(0, 5),
+    })
+
+    console.log(`[Agent] ✅ 压缩完成: ${this.messages.length} 条消息, ~${(estimateMessagesTokens(this.messages) / 1000).toFixed(0)}K tokens`)
   }
 
-  /** 内存压力监控 — 估算 token 用量，超过阈值时结构化压缩（复用 compressHistory 的语义提取逻辑） */
-  private checkMemoryPressure(): void {
-    let totalChars = 0
-    for (const msg of this.messages) {
-      totalChars += msg.content?.length || 0
-      if (msg.tool_calls) {
-        for (const tc of msg.tool_calls) {
-          totalChars += JSON.stringify(tc.function).length
-        }
-      }
-    }
-    const estimatedTokens = Math.ceil(totalChars / 2)
+  /** 获取记忆统计（供测试/调试用） */
+  getMemoryStats() {
+    return this.memory.getStats()
+  }
 
-    const ratio = (this.ctx.permissions as any)?.memoryCleanupPercent
-      ? (this.ctx.permissions as any).memoryCleanupPercent / 100
-      : 0.7
-    const MAX_TOKENS = 1_000_000
-    const warnThreshold = MAX_TOKENS * ratio
-
-    if (estimatedTokens > warnThreshold) {
-      console.log(`[Agent] ⚠️ 内存压力: ~${Math.round(estimatedTokens / 1000)}K tokens (${Math.round(estimatedTokens / MAX_TOKENS * 100)}%)，触发结构化压缩`)
-      const sysIdx = this.messages.findIndex(m => m.role === 'system')
-      let cutoffIdx = this.messages.length
-      for (let i = this.messages.length - 1; i >= 0; i--) {
-        if (this.messages[i].role === 'assistant' && this.messages[i].tool_calls?.length) {
-          cutoffIdx = i
-          break
-        }
-      }
-      const toCompress = this.messages.slice(sysIdx + 1, cutoffIdx)
-      if (toCompress.length > 2) {
-        // 复用 compressHistory 的结构化提取逻辑
-        const projectTasks = new Map<string, string[]>()
-        const keyFindings: string[] = []
-        for (const msg of toCompress) {
-          if (msg.role === 'tool' && msg.content.length > 20) {
-            const firstLine = msg.content.split('\n')[0].slice(0, 150)
-            if (firstLine.includes('失败') || firstLine.includes('❌') || firstLine.includes('⚠️')) {
-              keyFindings.push(firstLine)
-            }
-            for (const [id, name] of this.ctx.projectNames) {
-              if (msg.content.includes(id) || msg.content.includes(name)) {
-                const tasks = projectTasks.get(id) || []
-                if (tasks.length < 2) tasks.push(firstLine)
-                projectTasks.set(id, tasks)
-              }
-            }
-          }
-        }
-
-        const parts: string[] = [`[内存清理 — 结构化压缩了 ${toCompress.length} 条历史消息，保留关键信息]`]
-        if (projectTasks.size > 0) {
-          parts.push('各项目最近动态:')
-          for (const [id, tasks] of projectTasks) {
-            const name = this.ctx.projectNames.get(id) || id.split('\\').pop() || id
-            parts.push(`  ${name}: ${tasks.join('; ')}`)
-          }
-        }
-        if (keyFindings.length > 0) {
-          parts.push(`需关注: ${keyFindings.slice(0, 3).join(' | ')}`)
-        }
-        parts.push(`当前内存占用约 ${Math.round(estimatedTokens / 1000)}K tokens，继续执行。`)
-
-        const sys = sysIdx >= 0 ? [this.messages[sysIdx]] : []
-        this.messages = [
-          ...sys,
-          { role: 'user' as const, content: parts.join('\n') },
-          ...this.messages.slice(cutoffIdx),
-        ]
-      }
-    }
+  /** 获取 Token 预算利用率报告 */
+  getTokenUtilization(): string {
+    return this.tokenBudgeter.getUtilizationReport()
   }
 
   private waitForPermission(): Promise<'allow' | 'deny' | 'allow_once'> {
