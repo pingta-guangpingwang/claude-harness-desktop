@@ -11,6 +11,7 @@ import { getActiveProjectTasks } from './tools.js'
 import { MemoryManager } from './memoryStore.js'
 import { TokenBudgeter, estimateTokens, estimateMessagesTokens } from './tokenBudget.js'
 import { detectProvider, type LLMProvider } from './llmProviders.js'
+import { buildContext } from './contextPipeline.js'
 
 // ---- DeepSeek API 调用（主进程版本）----
 
@@ -143,10 +144,13 @@ export class AgentLoop {
     // V3: 记录用户消息到热记忆
     this.memory.recordEvent('user', userMessage)
 
+    // V3: 通过六步 Processor Pipeline 构建系统提示词
+    const systemPrompt = await buildContext(this.ctx, this.tokenBudgeter)
+
     // 构建消息：保留历史对话 + 系统提示 + 当前用户消息
     this.messages = [
       ...this.messages,
-      { role: 'system', content: this.buildSystemPrompt() },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: userMessage },
     ]
 
