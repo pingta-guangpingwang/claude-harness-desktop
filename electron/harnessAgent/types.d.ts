@@ -53,6 +53,10 @@ export interface AgentContext {
     emitEvent?: (event: AgentEvent) => void;
     /** 用户中途插入的消息队列 — Agent 每轮开始前检查并合并到对话中 */
     pendingMessages?: string[];
+    /** 当前角色 ID（模块 B 角色系统） */
+    currentRole?: string;
+    /** 角色切换回调 */
+    onRoleSwitch?: (fromRole: string, toRole: string, reason: string) => void;
 }
 export interface ToolCallRequest {
     id: string;
@@ -116,6 +120,34 @@ export type AgentEvent = {
  | {
     type: 'user_queued';
     text: string;
+}
+/** Token 预算利用率报告（模块 F） */
+ | {
+    type: 'token_usage';
+    utilizationPercent: number;
+    usedTokens: number;
+    maxTokens: number;
+    report: string;
+}
+/** 记忆统计报告（模块 F） */
+ | {
+    type: 'memory_stats';
+    hotEvents: number;
+    hotTokens: number;
+    warmSummaries: number;
+    coldEntries: number;
+}
+/** 角色评分报告（模块 B 评分系统） */
+ | {
+    type: 'role_score_report';
+    report: string;
+    leaderboard: Array<{
+        roleId: string;
+        roleName: string;
+        compositeScore: number;
+        successRate: number;
+        totalTasks: number;
+    }>;
 };
 /** 权限决策 */
 export type PermissionDecision = 'allow' | 'deny' | 'allow_once';

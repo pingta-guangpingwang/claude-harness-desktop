@@ -282,7 +282,7 @@ export async function runPipeline(
     knowledge: '',
     meta: {
       providerModel: ctx.model,
-      maxContextTokens: 128_000,
+      maxContextTokens: 1_000_000,
     },
   }
 

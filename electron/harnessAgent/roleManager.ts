@@ -183,9 +183,9 @@ export class RoleManager {
           matchLen += keyword.length
         }
       }
-      // 评分加权：高评分角色在关键词匹配相同时优先
+      // 评分加权：只有关键词命中时才应用评分加值（无命中不参与竞争）
       const roleScore = this.scorer.getScore(id)
-      const scoreBonus = roleScore ? (roleScore.successRate - 0.5) * 0.5 : 0 // ±0.25 浮动
+      const scoreBonus = score > 0 && roleScore ? (roleScore.successRate - 0.5) * 0.5 : 0 // ±0.25 浮动
       const adjustedScore = score + scoreBonus
 
       if (adjustedScore > bestScore || (adjustedScore === bestScore && matchLen > bestMatchLen)) {

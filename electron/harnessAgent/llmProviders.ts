@@ -32,8 +32,8 @@ const DEEPSEEK_PROVIDER: LLMProvider = {
   messagesEndpoint: 'https://api.deepseek.com/anthropic/v1/messages',
   defaultModel: 'deepseek-v4-pro',
   availableModels: ['deepseek-v4-pro', 'deepseek-chat', 'deepseek-v3', 'deepseek-reasoner'],
-  maxContextTokens: 128_000,
-  maxOutputTokens: 4096,
+  maxContextTokens: 1_000_000,
+  maxOutputTokens: 8192,
   buildHeaders: (apiKey: string) => ({
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${apiKey}`,

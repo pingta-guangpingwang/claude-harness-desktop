@@ -1,6 +1,6 @@
 // 驾驭智能体 — Token 预算管理器
 // 借鉴 Google ADK Token Budget 体系 + Kimi 全量上下文策略
-// 核心原则：默认全量保留，只在必要时摘要 — 用满 128K 油箱而非每次只加 5 升
+// 核心原则：默认全量保留，只在必要时摘要 — 用满模型油箱而非每次只加 5 升
 
 export interface TokenAllocation {
   systemPromptTokens: number
@@ -23,7 +23,7 @@ export interface ProviderCapabilities {
 // 已知模型的上下文窗口大小（token）
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   'deepseek-chat': 128_000,
-  'deepseek-v4-pro': 128_000,
+  'deepseek-v4-pro': 1_000_000,
   'deepseek-v3': 128_000,
   'deepseek-reasoner': 64_000,
   'claude-sonnet-4-6': 200_000,
