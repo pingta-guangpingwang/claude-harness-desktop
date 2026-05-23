@@ -12,6 +12,7 @@ import { MemoryManager } from './memoryStore.js'
 import { TokenBudgeter, estimateTokens, estimateMessagesTokens } from './tokenBudget.js'
 import { detectProvider, type LLMProvider } from './llmProviders.js'
 import { buildContext } from './contextPipeline.js'
+import { SemanticMemory } from './semanticMemory.js'
 
 // ---- DeepSeek API 调用（主进程版本）----
 
@@ -91,12 +92,14 @@ export class AgentLoop {
   // V3: 记忆存储 + Token 预算
   private memory: MemoryManager = new MemoryManager()
   private tokenBudgeter: TokenBudgeter
+  private semanticMemory: SemanticMemory
 
   constructor(ctx: AgentContext, pm: PermissionManager, conversationHistory?: ConversationTurn[]) {
     this.ctx = ctx
     this.permissionManager = pm
     this.conversationId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
     this.tokenBudgeter = new TokenBudgeter(ctx.model)
+    this.semanticMemory = new SemanticMemory(this.memory.cold, ctx.apiKey)
 
     // 注入跨轮次对话历史（保留上下文记忆）
     if (conversationHistory && conversationHistory.length > 0) {
@@ -1068,6 +1071,16 @@ ${pluginSection}
   /** 获取 Token 预算利用率报告 */
   getTokenUtilization(): string {
     return this.tokenBudgeter.getUtilizationReport()
+  }
+
+  /** V3: 语义记忆搜索 */
+  async searchSemanticMemory(query: string, topK?: number) {
+    return this.semanticMemory.search(query, topK)
+  }
+
+  /** V3: 记录到语义记忆 */
+  async recordToSemanticMemory(entry: Parameters<SemanticMemory['record']>[0]) {
+    return this.semanticMemory.record(entry)
   }
 
   private waitForPermission(): Promise<'allow' | 'deny' | 'allow_once'> {
