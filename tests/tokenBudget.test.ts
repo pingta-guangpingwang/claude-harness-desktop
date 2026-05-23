@@ -40,9 +40,9 @@ describe('estimateTokens', () => {
 })
 
 describe('getProviderCapabilities', () => {
-  test('DeepSeek V4 Pro → 128K 窗口', () => {
+  test('DeepSeek V4 Pro → 1M 窗口', () => {
     const caps = getProviderCapabilities('deepseek-v4-pro')
-    expect(caps.maxContextTokens).toBe(128_000)
+    expect(caps.maxContextTokens).toBe(1_000_000)
   })
 
   test('Claude Opus 4.7 → 200K 窗口', () => {
@@ -65,7 +65,7 @@ describe('TokenBudgeter', () => {
 
   test('初始状态 — 无用量数据', () => {
     const report = budgeter.getUtilizationReport()
-    expect(report).toContain('128K tokens')
+    expect(report).toContain('1000K tokens')
     expect(report).toContain('暂无用量数据')
   })
 
@@ -73,16 +73,16 @@ describe('TokenBudgeter', () => {
     budgeter.recordRoundUsage(50_000, 2_000, 0)
     const report = budgeter.getUtilizationReport()
     expect(report).toContain('50K')
-    expect(report).toContain('39.1%')
+    expect(report).toContain('5.0%') // 50K/1000K = 5%
   })
 
   test('isApproachingLimit — 低于 80% 阈值', () => {
-    budgeter.recordRoundUsage(60_000, 2_000, 0)
+    budgeter.recordRoundUsage(600_000, 2_000, 0) // 60% of 1M
     expect(budgeter.isApproachingLimit()).toBe(false)
   })
 
   test('isApproachingLimit — 超过 80% 阈值', () => {
-    budgeter.recordRoundUsage(110_000, 2_000, 0)
+    budgeter.recordRoundUsage(850_000, 2_000, 0) // 85% of 1M
     expect(budgeter.isApproachingLimit()).toBe(true)
   })
 
@@ -96,7 +96,7 @@ describe('TokenBudgeter', () => {
     expect(alloc.hotTokens).toBeGreaterThan(0)
     expect(alloc.hotRoundCount).toBeGreaterThan(0)
     expect(alloc.totalUsed).toBeGreaterThan(0)
-    expect(alloc.windowTokens).toBe(128_000)
+    expect(alloc.windowTokens).toBe(1_000_000)
     expect(parseFloat(alloc.utilizationPercent)).toBeGreaterThan(0)
   })
 

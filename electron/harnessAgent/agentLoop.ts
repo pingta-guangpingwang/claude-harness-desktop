@@ -179,7 +179,13 @@ export class AgentLoop {
     }
 
     // V3: 通过六步 Processor Pipeline 构建系统提示词
-    const systemPrompt = await buildContext(this.ctx, this.tokenBudgeter)
+    let systemPrompt = await buildContext(this.ctx, this.tokenBudgeter)
+
+    // V3: 注入角色专属提示词（非 CEO 角色覆盖默认行为指令）
+    const activeRole = this.roleManager.getCurrentRole()
+    if (activeRole.id !== 'ceo') {
+      systemPrompt += `\n\n## 🎭 当前角色: ${activeRole.name}\n${activeRole.systemPrompt}\n\n**角色工具限制**: 你只能使用以下工具: ${activeRole.allowedTools.length > 0 ? activeRole.allowedTools.join(', ') : '全部'}。禁止使用: ${activeRole.deniedTools.length > 0 ? activeRole.deniedTools.join(', ') : '无'}。`
+    }
 
     // 构建消息：保留历史对话 + 系统提示 + 当前用户消息
     this.messages = [
@@ -389,6 +395,16 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
 
         // 权限检查（多层管道）
         const tool = getTool(tc.name)
+
+        // V3: 角色工具限制 — 非 CEO 角色不能越权使用工具
+        if (tool && !this.roleManager.getToolFilter()(tool)) {
+          const roleName = this.roleManager.getCurrentRole().name
+          onEvent({ type: 'tool_error', id: tc.id, name: tc.name, error: `当前角色 ${roleName} 不能使用 ${tc.name}` })
+          toolResults.push({ id: tc.id, name: tc.name, output: `角色限制: ${roleName} 不能使用 ${tc.name}` })
+          this.toolStartTimes.delete(tc.id)
+          continue
+        }
+
         const perm = tool
           ? this.permissionManager.checkTool(tool, tc.arguments)
           : { decision: 'deny' as const, reason: `未知工具: ${tc.name}` }
@@ -613,7 +629,10 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
     onEvent: (event: AgentEvent) => void,
   ): Promise<{ choices?: Array<{ message?: { content?: string; reasoning_content?: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }> } }>; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }> {
     // 使用 OpenAI 兼容格式（支持 tool calling）
-    const tools = getToolDeclarations()
+    const allTools = getToolDeclarations()
+    // V3: 角色工具过滤 — 非 CEO 角色只能看到允许的工具
+    const roleFilter = this.roleManager.getToolFilter()
+    const tools = allTools.filter(t => roleFilter({ name: t.function.name } as any))
 
     const provider = getProvider(this.ctx.model)
     const isAnthropic = provider.format === 'anthropic'
