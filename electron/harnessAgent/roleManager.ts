@@ -3,6 +3,7 @@
 // 角色系统作为可选叠加层，默认 CEO 拥有全部工具
 
 import type { AgentTool, AgentContext } from './types.js'
+import { RoleScorer, type RoleScore, type TaskRecord } from './roleScorer.js'
 
 // ---- 角色定义 ----
 
@@ -116,13 +117,17 @@ export class RoleManager {
   private roles: Map<string, RoleConfig> = new Map()
   private currentRoleId: string
   private roleHistory: Array<{ fromRole: string; toRole: string; reason: string; timestamp: string }> = []
+  private scorer: RoleScorer
+  /** 自定义角色集合（和内置角色分开管理，内置角色不可删除） */
+  private customRoleIds: Set<string> = new Set()
 
-  constructor() {
+  constructor(scorer?: RoleScorer) {
     // 注册内置角色
     for (const role of BUILTIN_ROLES) {
       this.roles.set(role.id, role)
     }
     this.currentRoleId = 'ceo'
+    this.scorer = scorer || new RoleScorer()
   }
 
   /** 注册自定义角色 */
@@ -161,12 +166,12 @@ export class RoleManager {
     }
   }
 
-  /** 根据用户消息自动推断最佳角色 */
+  /** 根据用户消息自动推断最佳角色（含评分加权） */
   inferRole(userMessage: string): { roleId: string; confidence: number; reason: string } {
     const msg = userMessage.toLowerCase()
     let bestRole = 'ceo'
     let bestScore = 0
-    let bestMatchLen = 0 // 平局时用关键词累计长度决胜负
+    let bestMatchLen = 0
 
     for (const [id, role] of this.roles) {
       if (role.isDefault) continue
@@ -178,19 +183,162 @@ export class RoleManager {
           matchLen += keyword.length
         }
       }
-      if (score > bestScore || (score === bestScore && matchLen > bestMatchLen)) {
-        bestScore = score
+      // 评分加权：高评分角色在关键词匹配相同时优先
+      const roleScore = this.scorer.getScore(id)
+      const scoreBonus = roleScore ? (roleScore.successRate - 0.5) * 0.5 : 0 // ±0.25 浮动
+      const adjustedScore = score + scoreBonus
+
+      if (adjustedScore > bestScore || (adjustedScore === bestScore && matchLen > bestMatchLen)) {
+        bestScore = adjustedScore
         bestRole = id
         bestMatchLen = matchLen
       }
     }
 
     const role = this.roles.get(bestRole)!
+    const roleScore = this.scorer.getScore(bestRole)
+    const scoreInfo = roleScore ? ` (评分: ${roleScore.compositeScore.toFixed(0)}/100, 成功率: ${(roleScore.successRate * 100).toFixed(0)}%)` : ''
     return {
       roleId: bestRole,
       confidence: Math.min(bestScore / 3, 1),
-      reason: bestRole === 'ceo' ? '默认角色' : `匹配关键词: ${role.triggerKeywords.filter(k => msg.includes(k.toLowerCase())).join(', ')}`,
+      reason: bestRole === 'ceo' ? `默认角色${scoreInfo}` : `匹配关键词: ${role.triggerKeywords.filter(k => msg.includes(k.toLowerCase())).join(', ')}${scoreInfo}`,
     }
+  }
+
+  /** 手动创建自定义角色 */
+  createCustomRole(config: {
+    id: string
+    name: string
+    description: string
+    systemPrompt: string
+    allowedTools?: string[]
+    deniedTools?: string[]
+    triggerKeywords?: string[]
+    canDelegateTo?: string[]
+    knowledgeTags?: string[]
+    capabilities?: string[]
+    skills?: string[]
+  }): { success: boolean; message: string; role?: RoleConfig } {
+    // 验证 ID
+    if (!config.id || !/^[a-z0-9_-]+$/i.test(config.id)) {
+      return { success: false, message: '角色 ID 只能包含字母、数字、下划线和连字符' }
+    }
+    if (this.roles.has(config.id)) {
+      return { success: false, message: `角色 ${config.id} 已存在，请用其他 ID` }
+    }
+    if (!config.name.trim()) {
+      return { success: false, message: '角色名称不能为空' }
+    }
+
+    const role: RoleConfig = {
+      id: config.id,
+      name: config.name,
+      description: config.description,
+      systemPrompt: config.systemPrompt,
+      allowedTools: config.allowedTools || [],
+      deniedTools: config.deniedTools || [],
+      triggerKeywords: config.triggerKeywords || [],
+      canDelegateTo: config.canDelegateTo || [],
+      knowledgeTags: config.knowledgeTags || [],
+      isDefault: false,
+      agentCard: {
+        capabilities: config.capabilities || [config.description],
+        skills: config.skills || [],
+        maxConcurrentTasks: 1,
+        preferredTools: config.allowedTools || [],
+      },
+    }
+
+    this.roles.set(config.id, role)
+    this.customRoleIds.add(config.id)
+
+    // 初始化评分
+    this.scorer.getScore(config.id) // 确保评分记录存在
+
+    return { success: true, message: `角色 "${config.name}" 创建成功`, role }
+  }
+
+  /**
+   * AI 建议创建新角色 — 驾驭智能体发现任务模式不匹配现有角色时调用
+   * 返回建议的角色配置草稿，用户审核后可调用 createCustomRole 确认创建
+   */
+  suggestNewRole(observation: {
+    taskPattern: string       // 观察到的任务模式描述
+    suggestedName: string     // 建议的角色名称
+    suggestedId?: string      // 建议的角色 ID（自动生成）
+    missingKeywords: string[] // 现有角色未覆盖的关键词
+    neededTools: string[]     // 需要的工具列表
+    neededSkills: string[]    // 需要的技能描述
+  }): { suggestion: Omit<Parameters<RoleManager['createCustomRole']>[0], 'systemPrompt'>; systemPromptTemplate: string } {
+    const id = observation.suggestedId || observation.suggestedName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+    const capabilities = [...observation.neededSkills, observation.taskPattern]
+    const knowledgeTags = [...observation.missingKeywords, observation.suggestedName.toLowerCase()]
+
+    return {
+      suggestion: {
+        id,
+        name: observation.suggestedName,
+        description: `AI 建议创建的角色 — ${observation.taskPattern}`,
+        allowedTools: observation.neededTools,
+        deniedTools: [],
+        triggerKeywords: observation.missingKeywords,
+        canDelegateTo: ['ceo'],
+        knowledgeTags,
+        capabilities,
+        skills: observation.neededSkills,
+      },
+      systemPromptTemplate: `你是 DeepBlue ${observation.suggestedName}角色。\n你的职责是${observation.taskPattern}。\n\n## 可用工具\n${observation.neededTools.map(t => `- ${t}`).join('\n')}\n\n用中文，简洁有力。`,
+    }
+  }
+
+  /** 删除自定义角色（内置角色不可删除） */
+  deleteRole(roleId: string): { success: boolean; message: string } {
+    if (!this.customRoleIds.has(roleId)) {
+      return { success: false, message: `角色 ${roleId} 是内置角色，不可删除` }
+    }
+    if (!this.roles.has(roleId)) {
+      return { success: false, message: `角色 ${roleId} 不存在` }
+    }
+
+    this.roles.delete(roleId)
+    this.customRoleIds.delete(roleId)
+    this.scorer.resetScore(roleId)
+
+    // 如果当前正在使用此角色，切回 CEO
+    if (this.currentRoleId === roleId) {
+      this.currentRoleId = 'ceo'
+    }
+
+    return { success: true, message: `角色 ${roleId} 已删除` }
+  }
+
+  /** 获取所有角色及其评分 */
+  getRolesWithScores(): Array<{ role: RoleConfig; score: RoleScore | null; isCustom: boolean }> {
+    return [...this.roles.values()].map(role => ({
+      role,
+      score: this.scorer.getScore(role.id),
+      isCustom: this.customRoleIds.has(role.id),
+    }))
+  }
+
+  /** 获取评分器（供 AgentLoop 记录任务） */
+  getScorer(): RoleScorer {
+    return this.scorer
+  }
+
+  /** 获取评分排行榜 */
+  getLeaderboard(topK?: number): RoleScore[] {
+    return this.scorer.getLeaderboard(topK)
+  }
+
+  /** 生成评分报告 */
+  generateScoreReport(): string {
+    return this.scorer.generateReport()
+  }
+
+  /** 是否为自定义角色 */
+  isCustomRole(roleId: string): boolean {
+    return this.customRoleIds.has(roleId)
   }
 
   /** 自动切换 — 如果推断置信度足够高则切换 */

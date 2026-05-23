@@ -6,6 +6,8 @@ module.exports = {
   testMatch: ['**/*.test.ts'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/electron/$1',
+    // Node16 module resolution: strip .js extension so ts-jest resolves to .ts
+    '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {

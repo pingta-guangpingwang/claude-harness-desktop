@@ -17,6 +17,7 @@ import { DecisionTracer } from './decisionTracer.js'
 import { HITLManager } from './hitlManager.js'
 import { RoleManager } from './roleManager.js'
 import { DocToSkillLoader } from './docToSkill.js'
+import { RoleScorer, type TaskRecord } from './roleScorer.js'
 
 // ---- DeepSeek API 调用（主进程版本）----
 
@@ -101,6 +102,8 @@ export class AgentLoop {
   private hitl: HITLManager
   private roleManager: RoleManager
   private docToSkill: DocToSkillLoader
+  private roleScorer: RoleScorer
+  private toolStartTimes: Map<string, number> = new Map()
 
   constructor(ctx: AgentContext, pm: PermissionManager, conversationHistory?: ConversationTurn[]) {
     this.ctx = ctx
@@ -115,7 +118,8 @@ export class AgentLoop {
     if (ctx.permissions && (ctx.permissions as any).enableHITL) {
       this.hitl.setEnabled(true)
     }
-    this.roleManager = new RoleManager()
+    this.roleScorer = new RoleScorer()
+    this.roleManager = new RoleManager(this.roleScorer)
     this.docToSkill = new DocToSkillLoader()
 
     // 注入跨轮次对话历史（保留上下文记忆）
@@ -378,8 +382,9 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
 
         onEvent({ type: 'tool_call', id: tc.id, name: tc.name, params: tc.arguments })
 
-        // V3: 追踪工具执行
+        // V3: 追踪工具执行 + 计时
         const toolSpanId = this.tracer.startSpan('tool_exec', { toolName: tc.name, args: JSON.stringify(tc.arguments).slice(0, 200) })
+        this.toolStartTimes.set(tc.id, performance.now())
 
         // 权限检查（多层管道）
         const tool = getTool(tc.name)
@@ -432,6 +437,21 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
           success: result.success,
           outputLen: result.output.length,
         }, result.success ? undefined : result.output.slice(0, 100))
+
+        // V3: 角色评分 — 记录任务执行结果
+        const toolDuration = this.toolStartTimes.get(tc.id)
+          ? performance.now() - this.toolStartTimes.get(tc.id)!
+          : 0
+        this.toolStartTimes.delete(tc.id)
+        this.roleScorer.recordTask({
+          roleId: this.ctx.currentRole || this.roleManager.getCurrentRole().id,
+          task: `${tc.name}: ${JSON.stringify(tc.arguments).slice(0, 100)}`,
+          toolUsed: tc.name,
+          projectPath: (tc.arguments as any).project_path || (tc.arguments as any).projectPath,
+          result: result.success ? 'success' : 'failure',
+          durationMs: Math.round(toolDuration),
+          errorMessage: result.success ? undefined : result.output.slice(0, 150),
+        })
       }
 
       // 工具执行完后检查是否被中断（长时间工具如 wake_projects 可能被用户打断）
@@ -1168,6 +1188,21 @@ ${pluginSection}
   /** V3: 获取 Doc-to-Skill 加载器 */
   getDocToSkill(): DocToSkillLoader {
     return this.docToSkill
+  }
+
+  /** V3: 获取角色评分器 */
+  getRoleScorer(): RoleScorer {
+    return this.roleScorer
+  }
+
+  /** V3: 手动记录任务到评分系统（供外部调用） */
+  recordTaskResult(record: Omit<TaskRecord, 'id' | 'timestamp'>): TaskRecord {
+    return this.roleScorer.recordTask(record)
+  }
+
+  /** V3: 生成角色评分报告 */
+  getRoleScoreReport(): string {
+    return this.roleScorer.generateReport()
   }
 
   private waitForPermission(): Promise<'allow' | 'deny' | 'allow_once'> {
