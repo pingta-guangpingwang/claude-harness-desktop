@@ -169,7 +169,7 @@ CHD 是一款完全免费的开源软件。如果你觉得它对你有帮助，�
       <b>支付宝<br/>Alipay</b>
     </td>
     <td align="center">
-      <img src="public/94407fbdd42a797af5a902bc107d72e8.jpg" width="180" /><br/>
+      <img src="public/94407fbdd42a797af5a902bc107d72e8.jpg?v=2" width="180" /><br/>
       <b>微信交流群<br/>WeChat Group</b>
     </td>
   </tr>
