@@ -89,6 +89,7 @@ src/
     Productivity/      # 效率仪表盘、模板库、快速启动器
   context/             # React Context 全局状态
   i18n/                # 中英文翻译
+public/                 # 静态资源 (赞助码 / 交流群)
 tests/                  # 单元测试 (5 套件, 115 用例)
 ```
 
@@ -152,6 +153,27 @@ tests/                  # 单元测试 (5 套件, 115 用例)
 Built by **Pingtao Guangping Wang** — [shenlanai.com](https://shenlanai.com)
 
 *Claude Harness Desktop is not affiliated with Anthropic. Claude Code is a trademark of Anthropic PBC.*
+
+## 联系与支持
+
+CHD 是一款完全免费的开源软件。如果你觉得它对你有帮助，欢迎打赏支持，你的鼓励是我持续更新的动力。
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="public/f9e661730d92fb35985a8d0dffcfb624.jpg" width="180" /><br/>
+      <b>微信支付<br/>WeChat Pay</b>
+    </td>
+    <td align="center">
+      <img src="public/cd5741cc158ccc6be0b524f0444cc22c.jpg" width="180" /><br/>
+      <b>支付宝<br/>Alipay</b>
+    </td>
+    <td align="center">
+      <img src="public/94407fbdd42a797af5a902bc107d72e8.jpg" width="180" /><br/>
+      <b>微信交流群<br/>WeChat Group</b>
+    </td>
+  </tr>
+</table>
 
 ## License
 
