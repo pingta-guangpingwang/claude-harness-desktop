@@ -169,7 +169,7 @@ export class AgentLoop {
     this.memory.recordEvent('user', userMessage)
 
     // V3: 角色自动检测（如果开启了角色系统）
-    if (this.ctx.currentRole === undefined || (this.ctx.permissions as any)?.enableRoleSystem) {
+    if (this.ctx.currentRole === undefined && this.roleManager.isSystemEnabled()) {
       const roleResult = this.roleManager.autoSwitch(userMessage)
       if (roleResult.switched) {
         this.ctx.currentRole = roleResult.roleId

@@ -175,6 +175,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   harnessSaveLogs: (logs: any[]) => ipcRenderer.invoke('harness:save-logs', logs),
   harnessLoadLogs: () => ipcRenderer.invoke('harness:load-logs'),
 
+  // ============ Harness Role Management (V3.7) ============
+  harnessRolesList: () => ipcRenderer.invoke('harness:roles-list'),
+  harnessRolesCreate: (params: any) => ipcRenderer.invoke('harness:roles-create', params),
+  harnessRolesDelete: (roleId: string) => ipcRenderer.invoke('harness:roles-delete', roleId),
+  harnessRolesLeaderboard: (topK?: number) => ipcRenderer.invoke('harness:roles-leaderboard', topK),
+  harnessRolesScoreReport: () => ipcRenderer.invoke('harness:roles-score-report'),
+  harnessRolesSetRoleEnabled: (roleId: string, enabled: boolean) => ipcRenderer.invoke('harness:roles-set-role-enabled', roleId, enabled),
+  harnessRolesSetSystemEnabled: (enabled: boolean) => ipcRenderer.invoke('harness:roles-set-system-enabled', enabled),
+  harnessRolesLoadConfig: () => ipcRenderer.invoke('harness:roles-load-config'),
+
   // ============ CLI Command System (v3.1) ============
   cliSearch: (query: string) => ipcRenderer.invoke('cli:search', query),
   cliList: () => ipcRenderer.invoke('cli:list'),

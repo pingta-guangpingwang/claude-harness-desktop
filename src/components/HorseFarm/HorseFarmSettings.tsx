@@ -3,6 +3,7 @@ import { useI18n } from '../../i18n'
 import { useHFContext } from '../../context/HFContext'
 import type { HFApiKey, HFConfig } from '../../types/horseFarm'
 import { DEEPSEEK_MODELS, DEFAULT_API_CONFIG } from '../../types/horseFarm'
+import RoleManagement from './RoleManagement'
 
 interface HorseFarmSettingsProps {
   config: HFConfig
@@ -618,6 +619,13 @@ export default function HorseFarmSettings({ config, onConfigChange }: HorseFarmS
       {/* Hub Settings — 中枢层设置 */}
       {/* ================================================================ */}
       <HubSettingsSection />
+
+      <hr style={{ margin: '24px 0', border: 'none', borderTop: '1px solid #e5e7eb' }} />
+
+      {/* ================================================================ */}
+      {/* Role Management — 驾驭角色管理 */}
+      {/* ================================================================ */}
+      <RoleManagement />
     </div>
   )
 }

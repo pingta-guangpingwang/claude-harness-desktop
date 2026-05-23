@@ -111,6 +111,15 @@ export interface ElectronAPI {
   harnessScheduleList: () => Promise<{ success: boolean; tasks: any[]; stats: any }>
   harnessSaveLogs: (logs: any[]) => Promise<{ success: boolean; error?: string }>
   harnessLoadLogs: () => Promise<{ success: boolean; logs: any[] }>
+  // Harness Role Management (V3.7)
+  harnessRolesList: () => Promise<{ success: boolean; roles: Array<{ role: any; score: any; isCustom: boolean; enabled: boolean }>; error?: string }>
+  harnessRolesCreate: (params: any) => Promise<{ success: boolean; message: string; role?: any }>
+  harnessRolesDelete: (roleId: string) => Promise<{ success: boolean; message: string }>
+  harnessRolesLeaderboard: (topK?: number) => Promise<{ success: boolean; leaderboard: any[] }>
+  harnessRolesScoreReport: () => Promise<{ success: boolean; report: string }>
+  harnessRolesSetRoleEnabled: (roleId: string, enabled: boolean) => Promise<{ success: boolean }>
+  harnessRolesSetSystemEnabled: (enabled: boolean) => Promise<{ success: boolean }>
+  harnessRolesLoadConfig: () => Promise<{ success: boolean; config: { roleSystemEnabled: boolean; enabledRoleIds: string[]; customRoles: any[] } }>
   // CLI Command System (v3.1)
   cliSearch: (query: string) => Promise<{ success: boolean; commands: any[] }>
   cliList: () => Promise<{ success: boolean; commands: any[] }>

@@ -151,21 +151,38 @@ describe('RoleManager.autoSwitch', () => {
     rm = new RoleManager()
   })
 
-  test('高置信度 → 自动切换', () => {
+  test('系统未启用时 → 不切换', () => {
+    const result = rm.autoSwitch('帮我开发一个新功能修复这个代码错误', 0.5)
+    expect(result.switched).toBe(false)
+    expect(result.reason).toContain('未启用')
+  })
+
+  test('系统启用后 → 高置信度自动切换', () => {
+    rm.setSystemEnabled(true)
     const result = rm.autoSwitch('帮我开发一个新功能修复这个代码错误', 0.5)
     expect(result.switched).toBe(true)
   })
 
   test('低置信度 → 不切换', () => {
+    rm.setSystemEnabled(true)
     const result = rm.autoSwitch('你好', 0.9)
     expect(result.switched).toBe(false)
     expect(result.roleId).toBe('ceo')
   })
 
   test('已经是目标角色 → 不切换', () => {
+    rm.setSystemEnabled(true)
     rm.switchTo('diagnostician', 'test')
     const result = rm.autoSwitch('诊断这个错误是什么原因', 0.3)
     expect(result.switched).toBe(false)
     expect(result.roleId).toBe('diagnostician')
+  })
+
+  test('禁用角色不会被推断和切换', () => {
+    rm.setSystemEnabled(true)
+    rm.setRoleEnabled('worker', false)
+    const result = rm.autoSwitch('帮我开发一个新功能', 0.3)
+    expect(result.switched).toBe(false)
+    expect(result.roleId).toBe('ceo')
   })
 })

@@ -4,6 +4,7 @@
 
 import type { AgentTool, AgentContext } from './types.js'
 import { RoleScorer, type RoleScore, type TaskRecord } from './roleScorer.js'
+import { roleConfigStore } from './roleConfigStore.js'
 
 // ---- 角色定义 ----
 
@@ -120,14 +121,26 @@ export class RoleManager {
   private scorer: RoleScorer
   /** 自定义角色集合（和内置角色分开管理，内置角色不可删除） */
   private customRoleIds: Set<string> = new Set()
+  /** 已启用的角色 ID 集合（从持久化配置加载） */
+  private enabledRoleIds: Set<string>
+  /** 角色系统主开关（从持久化配置加载） */
+  private roleSystemEnabled: boolean
 
   constructor(scorer?: RoleScorer) {
     // 注册内置角色
     for (const role of BUILTIN_ROLES) {
       this.roles.set(role.id, role)
     }
+    // 从持久化加载自定义角色
+    for (const cr of roleConfigStore.customRoles) {
+      this.roles.set(cr.id, cr)
+      this.customRoleIds.add(cr.id)
+    }
     this.currentRoleId = 'ceo'
     this.scorer = scorer || new RoleScorer()
+    // 从持久化加载启用状态
+    this.enabledRoleIds = new Set(roleConfigStore.enabledRoleIds)
+    this.roleSystemEnabled = roleConfigStore.systemEnabled
   }
 
   /** 注册自定义角色 */
@@ -175,6 +188,8 @@ export class RoleManager {
 
     for (const [id, role] of this.roles) {
       if (role.isDefault) continue
+      // 跳过未启用的角色
+      if (!this.enabledRoleIds.has(id)) continue
       let score = 0
       let matchLen = 0
       for (const keyword of role.triggerKeywords) {
@@ -252,6 +267,9 @@ export class RoleManager {
     this.roles.set(config.id, role)
     this.customRoleIds.add(config.id)
 
+    // 持久化到配置存储
+    roleConfigStore.addCustomRole(role)
+
     // 初始化评分
     this.scorer.getScore(config.id) // 确保评分记录存在
 
@@ -304,6 +322,9 @@ export class RoleManager {
     this.customRoleIds.delete(roleId)
     this.scorer.resetScore(roleId)
 
+    // 同步到持久化存储
+    roleConfigStore.removeCustomRole(roleId)
+
     // 如果当前正在使用此角色，切回 CEO
     if (this.currentRoleId === roleId) {
       this.currentRoleId = 'ceo'
@@ -341,8 +362,37 @@ export class RoleManager {
     return this.customRoleIds.has(roleId)
   }
 
+  /** 角色系统主开关是否启用 */
+  isSystemEnabled(): boolean {
+    return this.roleSystemEnabled
+  }
+
+  /** 设置角色系统主开关（同步持久化） */
+  setSystemEnabled(enabled: boolean): void {
+    this.roleSystemEnabled = enabled
+    roleConfigStore.setSystemEnabled(enabled)
+  }
+
+  /** 指定角色是否启用 */
+  isRoleEnabled(roleId: string): boolean {
+    return this.enabledRoleIds.has(roleId)
+  }
+
+  /** 设置指定角色的启用状态（同步持久化） */
+  setRoleEnabled(roleId: string, enabled: boolean): void {
+    if (enabled) {
+      this.enabledRoleIds.add(roleId)
+    } else {
+      this.enabledRoleIds.delete(roleId)
+    }
+    roleConfigStore.setRoleEnabled(roleId, enabled)
+  }
+
   /** 自动切换 — 如果推断置信度足够高则切换 */
   autoSwitch(userMessage: string, minConfidence: number = 0.6): { switched: boolean; roleId: string; reason: string } {
+    if (!this.roleSystemEnabled) {
+      return { switched: false, roleId: this.currentRoleId, reason: '角色系统未启用' }
+    }
     const inference = this.inferRole(userMessage)
     if (inference.confidence >= minConfidence && inference.roleId !== this.currentRoleId) {
       const result = this.switchTo(inference.roleId, inference.reason)

@@ -236,6 +236,68 @@ export function registerHarnessIpc(window: BrowserWindow) {
     }
     return { success: true, logs: [] }
   })
+
+  // ====== 角色管理 (V3.7) ======
+  const { roleConfigStore } = await import('../harnessAgent/roleConfigStore.js')
+  const { RoleManager } = await import('../harnessAgent/roleManager.js')
+
+  ipcMain.handle('harness:roles-list', async () => {
+    try {
+      const roles = roleConfigStore.getRolesWithScores()
+      return { success: true, roles }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('harness:roles-create', async (_event, params: any) => {
+    try {
+      const rm = new RoleManager()
+      const result = rm.createCustomRole(params)
+      return result
+    } catch (e) { return { success: false, message: String(e) } }
+  })
+
+  ipcMain.handle('harness:roles-delete', async (_event, roleId: string) => {
+    try {
+      const rm = new RoleManager()
+      const result = rm.deleteRole(roleId)
+      return result
+    } catch (e) { return { success: false, message: String(e) } }
+  })
+
+  ipcMain.handle('harness:roles-leaderboard', async (_event, topK?: number) => {
+    try {
+      const leaderboard = roleConfigStore.getLeaderboard(topK)
+      return { success: true, leaderboard }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('harness:roles-score-report', async () => {
+    try {
+      const report = roleConfigStore.generateScoreReport()
+      return { success: true, report }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('harness:roles-set-role-enabled', async (_event, roleId: string, enabled: boolean) => {
+    try {
+      roleConfigStore.setRoleEnabled(roleId, enabled)
+      return { success: true }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('harness:roles-set-system-enabled', async (_event, enabled: boolean) => {
+    try {
+      roleConfigStore.setSystemEnabled(enabled)
+      return { success: true }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('harness:roles-load-config', async () => {
+    try {
+      const config = roleConfigStore.getConfig()
+      return { success: true, config }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
 }
 
 function sendToRenderer(channel: string, ...args: unknown[]) {
