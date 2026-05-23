@@ -6,6 +6,8 @@ import { executeTool, getToolDeclarations, getTool, getAllTools } from './toolRe
 import { PermissionManager } from './permissionManager'
 import { taskQueue } from './taskQueue.js'
 import { getTokenStore } from '../modules/tokenStore.js'
+import { buildReflectionPrompt, parseReflectionOutput, formatReflectionForLLM, type ReflectionResult } from './reflector.js'
+import { getActiveProjectTasks } from './tools.js'
 
 // ---- DeepSeek API 调用（主进程版本）----
 
@@ -48,6 +50,25 @@ export interface ConversationTurn {
 
 const OPENAI_ENDPOINT = 'https://api.deepseek.com/v1/chat/completions'
 const ANTHROPIC_ENDPOINT = 'https://api.deepseek.com/anthropic/v1/messages'
+
+/** fetch 带超时的包装器 — 超时抛 AbortError，不残留定时器 */
+async function fetchWithTimeout(
+  url: string, init: RequestInit, timeoutMs: number,
+): Promise<Response | null> {
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), timeoutMs)
+  // 若父 signal 先触发，也中止
+  if (init.signal) {
+    init.signal.addEventListener('abort', () => ac.abort(), { once: true })
+  }
+  try {
+    return await fetch(url, { ...init, signal: ac.signal })
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 export class AgentLoop {
   private messages: DeepSeekMessage[] = []
@@ -143,26 +164,41 @@ export class AgentLoop {
       // 内存压力检查：估计 token 用量，超过 80% 时触发激进清理
       this.checkMemoryPressure()
 
-      // 调用 LLM（捕获中断信号，避免 AbortError 泄漏到前端显示）
+      // 调用 LLM（捕获中断信号 + 网络瞬断重试，避免 AbortError/TypeError 泄漏到前端显示）
       let response: Awaited<ReturnType<typeof this.callLLMStream>>
-      try {
-        response = await this.callLLMStream(signal, onEvent)
-      } catch (e: any) {
-        if (e?.name === 'AbortError' || signal.aborted) {
-          // 区分：用户插话（queueMessage 触发的 abort）vs 完全中止（abort 按钮）
-          if (this.ctx.pendingMessages && this.ctx.pendingMessages.length > 0) {
-            // 用户插话 → 不退出循环，重建 controller 继续
-            this.abortController = new AbortController()
-            signal = this.abortController.signal
-            console.log('[AgentLoop] 用户插话中断 — 重建 controller，继续循环')
+      let lastError: any = null
+      let llmSuccess = false
+      for (let attempt = 0; attempt < 3 && !llmSuccess; attempt++) {
+        try {
+          response = await this.callLLMStream(signal, onEvent)
+          llmSuccess = true
+        } catch (e: any) {
+          lastError = e
+          if (e?.name === 'AbortError' || signal.aborted) {
+            // 区分：用户插话（queueMessage 触发的 abort）vs 完全中止（abort 按钮）
+            if (this.ctx.pendingMessages && this.ctx.pendingMessages.length > 0) {
+              this.abortController = new AbortController()
+              signal = this.abortController.signal
+              console.log('[AgentLoop] 用户插话中断 — 重建 controller，继续循环')
+              continue
+            }
+            onEvent({ type: 'done', finalMessage: '' })
+            return '用户中断，等待新指令'
+          }
+          // 网络错误 → 重试（最多 2 次）
+          if ((e instanceof TypeError || e?.name === 'TypeError' || String(e).includes('fetch failed')) && attempt < 2) {
+            const delay = (attempt + 1) * 3000
+            onEvent({ type: 'text_delta', content: `\n⚠️ API 网络异常，${delay / 1000}s 后重试 (${attempt + 1}/2)...` })
+            console.warn(`[AgentLoop] fetch failed, retry ${attempt + 1}/2 after ${delay}ms`)
+            await new Promise(r => setTimeout(r, delay))
+            if (signal.aborted) break
             continue
           }
-          // 完全中止 → 退出
-          onEvent({ type: 'done', finalMessage: '' })
-          return '用户中断，等待新指令'
+          // 非网络错误或重试耗尽 → 抛出
+          llmSuccess = false
         }
-        throw e
       }
+      if (!llmSuccess) throw lastError
 
       // 记录 token 消耗
       if (response.usage) {
@@ -184,7 +220,7 @@ export class AgentLoop {
       // 收集 tool calls
       const toolCalls = this.extractToolCalls(response)
       if (toolCalls.length === 0) {
-        // 没有工具调用 → Agent 本轮完成
+        // 没有工具调用 → Agent 本轮"想说点什么"
         const finalText = response.choices?.[0]?.message?.content || ''
 
         // 保存本轮 assistant 回复到对话历史
@@ -193,7 +229,6 @@ export class AgentLoop {
         }
 
         // C1: 自主循环 — 队列有待办时自动取下一个执行
-        // 只注入紧凑的任务摘要到 context，完整结果存档在 taskQueue.result
         if (this.ctx.autonomousMode && !signal.aborted) {
           const next = taskQueue.getNext()
           if (next && (!this.ctx.maxAutonomousTurns || this.ctx.maxAutonomousTurns > 0)) {
@@ -206,8 +241,58 @@ export class AgentLoop {
             if (this.ctx.maxAutonomousTurns) this.ctx.maxAutonomousTurns--
             continue
           }
-          // 队列空 → 退出自主模式
-          onEvent({ type: 'text_delta', content: '\n✅ 自主模式: 队列已清空' })
+        }
+
+        // C2: 心跳守卫 — 有活跃项目任务时，禁止停止！注入心跳检查，让 Agent 继续轮询
+        const activeTasks = getActiveProjectTasks()
+        // 先过滤掉过期标记：超过 5 分钟且 PTY 空闲的 → 自动视为完成，不触发心跳
+        let staleCount = 0
+        const trulyActive: Array<[string, { task: string; startedAt: number; lastCheckAt: number }]> = []
+        for (const [p, t] of activeTasks) {
+          const elapsed = Date.now() - t.startedAt
+          if (elapsed > 300000) {
+            staleCount++
+            continue // 超过 5 分钟视为过期，不阻塞停止
+          }
+          trulyActive.push([p, t])
+        }
+        if (staleCount > 0) {
+          onEvent({ type: 'text_delta', content: `\n🧹 心跳守卫: ${staleCount} 个项目 busy 标记已过期(>5min)，自动忽略` })
+        }
+
+        if (trulyActive.length > 0 && !signal.aborted) {
+          const projectNames: string[] = []
+          for (const [p, t] of trulyActive) {
+            const name = this.ctx.projectNames.get(p) || p.split('\\').pop() || p
+            projectNames.push(`${name}(${Math.round((Date.now() - t.startedAt) / 1000)}s前: ${t.task.slice(0, 40)})`)
+          }
+          const heartbeatPrompt = `[心跳守卫] 以下 ${trulyActive.length} 个项目仍有活跃任务，**你不能停止**！请立即检查进度：
+${projectNames.map(n => `  - ${n}`).join('\n')}
+
+执行步骤：
+1. poll_projects 检查活跃状态（会自动清理过期 busy 标记）
+2. 对空闲的项目 read_project_chat 确认是完成了还是被卡住
+3. 已完成的项目用 verify_project 验收
+4. 被卡住的项目用 diagnose_project 诊断 → 按恢复策略解除阻塞 → 重新派发任务
+5. 仍在工作中的项目继续等待
+
+**完成验收后 poll_projects 会自动清除 busy 标记，下次心跳就不会再触发。**`
+
+          onEvent({ type: 'text_delta', content: `\n💓 心跳守卫: ${trulyActive.length} 个项目仍在工作中，继续监控...` })
+          this.messages.push({ role: 'user', content: heartbeatPrompt })
+          // 重置轮次计数，给心跳检查充足的轮次
+          maxTurns = Math.max(maxTurns, 15)
+          continue
+        }
+
+        // 所有 busy 都已过期 → 清理掉，允许停止
+        if (staleCount > 0 && trulyActive.length === 0) {
+          onEvent({ type: 'text_delta', content: '\n✅ 所有项目 busy 标记已过期或已清理，任务完成。' })
+        }
+
+        // C3: 队列空 + 无活跃项目任务 → 真正完成
+        if (this.ctx.autonomousMode) {
+          onEvent({ type: 'text_delta', content: '\n✅ 所有任务已完成，队列已清空' })
         }
 
         onEvent({ type: 'done', finalMessage: finalText })
@@ -277,13 +362,28 @@ export class AgentLoop {
       for (const tr of toolResults) {
         this.messages.push({
           role: 'tool',
-          content: tr.output,
+          content: this.summarizeToolResult(tr.name, tr.output),
           tool_call_id: tr.id,
         })
       }
 
       // A2: 对话历史智能压缩 — messages > 24 条时压缩早期轮次
       this.compressHistory()
+
+      // A3: Reflection 反思步骤 — 工具执行后、下一轮决策前，轻量级结构化反思
+      if (toolCalls.length > 0 && toolResults.length > 0 && !signal.aborted) {
+        try {
+          const reflection = await this.runReflection(toolResults, signal)
+          if (reflection) {
+            this.messages.push({
+              role: 'user',
+              content: formatReflectionForLLM(reflection),
+            })
+          }
+        } catch {
+          // Reflection 失败不阻塞主循环
+        }
+      }
 
       // 注入非阻塞预取结果（第二轮及以后生效）
       if (!prefetchConsumed && pendingPrefetch) {
@@ -328,6 +428,66 @@ export class AgentLoop {
   }
 
   /**
+   * 轻量级 Reflection 调用 — 使用 tool_choice: 'none' 强制纯文本输出
+   * 速度极快（~1-2s），token 消耗极低（~200 tokens）
+   */
+  private async runReflection(
+    toolResults: Array<{ name: string; output: string }>,
+    signal: AbortSignal,
+  ): Promise<ReflectionResult | null> {
+    // 跳过连续调用：距上次 Reflection 不到 30s 则跳过
+    const now = Date.now()
+    if (this._lastReflectionAt && now - this._lastReflectionAt < 30000) return null
+    this._lastReflectionAt = now
+
+    const reflectionPrompt = buildReflectionPrompt(toolResults, this.ctx)
+    const reflectionMessages = [
+      { role: 'user' as const, content: reflectionPrompt },
+    ]
+
+    try {
+      const isClaude = this.ctx.model.startsWith('claude-')
+
+      const body = isClaude
+        ? {
+            model: this.ctx.model,
+            max_tokens: 300,
+            system: '',
+            messages: reflectionMessages,
+            stream: false,
+          }
+        : {
+            model: this.ctx.model,
+            max_tokens: 300,
+            messages: reflectionMessages,
+            tool_choice: 'none' as const,
+            stream: false,
+          }
+
+      const endpoint = isClaude ? ANTHROPIC_ENDPOINT : OPENAI_ENDPOINT
+      const headers: Record<string, string> = isClaude
+        ? { 'Content-Type': 'application/json', 'x-api-key': this.ctx.apiKey, 'anthropic-version': '2023-06-01' }
+        : { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.ctx.apiKey}` }
+
+      // 8 秒超时：Reflection 快了有用、慢了拖后腿，超时直接放弃
+      const res = await fetchWithTimeout(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal,
+      }, 8000)
+
+      if (!res || !res.ok) return null
+      const data = await res.json() as any
+      const raw = isClaude ? (data.content?.[0]?.text || '') : (data.choices?.[0]?.message?.content || '')
+      return parseReflectionOutput(raw)
+    } catch {
+      return null
+    }
+  }
+  private _lastReflectionAt: number = 0
+
+  /**
    * 调用 DeepSeek API（OpenAI 兼容格式，支持 tool calling）
    */
   private async callLLMStream(
@@ -340,22 +500,53 @@ export class AgentLoop {
     const isClaude = this.ctx.model.startsWith('claude-')
 
     if (isClaude) {
-      // Anthropic 格式
+      // Anthropic Messages API — 完整支持 streaming tool_use
       const systemMsg = this.messages.find(m => m.role === 'system')
-      const userMsgs = this.messages.filter(m => m.role !== 'system')
+      const nonSystemMsgs = this.messages.filter(m => m.role !== 'system')
+
+      // 转换工具声明: OpenAI format → Anthropic format
+      const anthropicTools = tools.map(t => ({
+        name: t.function.name,
+        description: t.function.description,
+        input_schema: t.function.parameters,
+      }))
+
+      // 转换消息: 内部 DeepSeekMessage → Anthropic content blocks 格式
+      const anthropicMessages = nonSystemMsgs.map(m => {
+        if (m.role === 'assistant' && m.tool_calls?.length) {
+          const content: Array<Record<string, unknown>> = []
+          if (m.content) content.push({ type: 'text', text: m.content })
+          for (const tc of m.tool_calls) {
+            content.push({
+              type: 'tool_use',
+              id: tc.id,
+              name: tc.function.name,
+              input: (() => { try { return JSON.parse(tc.function.arguments || '{}') } catch { return {} } })(),
+            })
+          }
+          return { role: 'assistant', content }
+        }
+        if (m.role === 'tool') {
+          return {
+            role: 'user',
+            content: [{
+              type: 'tool_result',
+              tool_use_id: m.tool_call_id || '',
+              content: m.content,
+            }],
+          }
+        }
+        return { role: m.role, content: m.content }
+      })
 
       const body: Record<string, unknown> = {
         model: this.ctx.model,
         max_tokens: 4096,
         system: systemMsg?.content || '',
-        messages: userMsgs.map(m => ({
-          role: m.role === 'tool' ? 'user' : m.role,
-          content: m.role === 'tool'
-            ? `Tool result (${m.tool_call_id}): ${m.content}`
-            : m.content,
-        })),
+        messages: anthropicMessages,
         stream: true,
       }
+      if (anthropicTools.length > 0) body.tools = anthropicTools
 
       const res = await fetch(ANTHROPIC_ENDPOINT, {
         method: 'POST',
@@ -370,17 +561,92 @@ export class AgentLoop {
 
       if (!res.ok) {
         const errText = await res.text().catch(() => '')
-        onEvent({ type: 'error', message: `API ${res.status}: ${errText.slice(0, 200)}` })
+        onEvent({ type: 'error', message: 'API ' + res.status + ': ' + errText.slice(0, 200) })
         return {}
       }
 
-      const data = await res.json()
-      const text = data.content?.[0]?.text || ''
-      onEvent({ type: 'text_delta', content: text })
-      // Anthropic 格式暂不支持 tool calling → 返回文本
-      return { choices: [{ message: { content: text } }] }
-    }
+      // 流式解析 Anthropic SSE (event: + data: 行格式)
+      const reader = res.body?.getReader()
+      if (!reader) return {}
 
+      const decoder = new TextDecoder()
+      let buff = ''
+      let fullText = ''
+      const tuAcc: Map<number, { id: string; name: string; input: string }> = new Map()
+      const result = {
+        choices: [{
+          message: {
+            content: '',
+            reasoning_content: '',
+            tool_calls: [],
+          },
+        }],
+      }
+      let streamUsage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null = null
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buff += decoder.decode(value, { stream: true })
+        const lines = buff.split('\n')
+        buff = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (!data) continue
+
+          try {
+            const event = JSON.parse(data)
+
+            if (event.type === 'content_block_delta') {
+              const delta = event.delta
+              if (delta?.type === 'text_delta' && delta.text) {
+                onEvent({ type: 'text_delta', content: delta.text })
+                fullText += delta.text
+              }
+              if (delta?.type === 'input_json_delta' && delta.partial_json) {
+                const idx = event.index ?? 0
+                if (!tuAcc.has(idx)) tuAcc.set(idx, { id: '', name: '', input: '' })
+                tuAcc.get(idx).input += delta.partial_json
+              }
+            }
+
+            if (event.type === 'content_block_start') {
+              const cb = event.content_block
+              if (cb?.type === 'tool_use') {
+                const idx = event.index ?? 0
+                tuAcc.set(idx, { id: cb.id || '', name: cb.name || '', input: '' })
+              }
+            }
+
+            if (event.type === 'message_delta') {
+              if (event.usage) {
+                streamUsage = {
+                  prompt_tokens: event.usage.input_tokens || 0,
+                  completion_tokens: event.usage.output_tokens || 0,
+                  total_tokens: (event.usage.input_tokens || 0) + (event.usage.output_tokens || 0),
+                }
+              }
+            }
+          } catch { /* skip malformed events */ }
+        }
+      }
+
+      result.choices[0].message.content = fullText
+      // 转换 tool_use blocks → OpenAI 兼容 tool_calls 格式
+      for (const [, acc] of tuAcc) {
+        if (acc.name) {
+          result.choices[0].message.tool_calls.push({
+            id: acc.id,
+            function: { name: acc.name, arguments: acc.input },
+          })
+        }
+      }
+
+      return { choices: result.choices, usage: streamUsage || undefined }
+    }
     // OpenAI 兼容格式
     const body: Record<string, unknown> = {
       model: this.ctx.model,
@@ -549,234 +815,136 @@ export class AgentLoop {
       pluginSection = `\n## 已安装的插件工具\n${toolList}\n\n### 插件工具使用规则（必须遵守！）\n以下场景对应已安装的工具，遇到直接调用，不要派给 task_project：\n${ruleText}`
     }
 
-    return `你是 Claude Harness Desktop 驾驭智能体（总经理/CEO 角色）。
+    return `你是 DeepBlue 驾驭智能体（CEO/总经理角色）。
 你的职责是调度指挥各项目的 Claude Code 终端（你的"员工"），而不是自己干活。${trustNote}
 
-**关键定位**：你是工厂总经理/维护工程师。每个项目下面都有专属的项目 AI（=你的工人）。
-- 你是管理者，不是项目开发者——绝不碰项目源码，绝不替项目 AI 写代码
-- 但你拥有基础设施工具（shell_exec/read_file/write_file），用于维护工厂运转：安装缺失的CLI工具、检查环境变量、读写配置文件(.json/.bat/.ps1/.txt)、排查系统问题
-- 你的工作：分配任务给员工 → 检查员工进度 → 考核员工输出质量 → 修基础设施问题
-- 要了解项目情况？看项目 AI 的聊天记录（read_project_chat），看它做了什么、输出好不好
-- 项目 AI 干活出了问题？把问题反馈给它，让它自己去修——你考核它，不是替它干
-- 工厂环境出了问题（Claude Code 未安装、路径不对、配置缺失）？用你的基础设施工具直接修复
+## 🫀 心跳纪律 — 总控不停止原则（最高优先级，违反即失职）
+你是**总控制器**，不是一次性工人。你的任务不是"回复一句就停"，而是**持续监控直到全部任务确认完成**。
 
-## 🚫 项目 AI 工作保护（铁律！中断 = 数据丢失！）
-0. **🔒 不打断原则（最高优先级）**：Claude Code 支持持续交互，项目 AI 干完活会自动接下一个任务。**你与项目 AI 之间默认不相互打断。** 唯一的两个例外：
-   - ⚠️ 项目 AI 明显在犯错（死循环、写垃圾、改错文件）→ 可用 write_to_pty 发 Ctrl+C 打断
-   - ⛔ 用户手动按键停止 → 信号会在系统中传递
-   除此之外，不准打断！
-1. **task_project / broadcast 会直接向项目 AI 终端发送文本，如果项目 AI 正在工作中，新文本会中断其当前操作！**
-2. **派发任务前必须先确认项目 AI 空闲**：
-   - task_project 有内置 busy 保护 — busy 时返回 ⛔ 阻断
-   - broadcast 有内置 busy 保护 — busy 的项目自动跳过（⏭️ 跳过不打扰）
-   - check_status 查活跃度确认
-   - 用 read_project_chat 查看实时进度（纯读取，不中断项目 AI）
-3. **用户给你发新消息 ≠ 你可以打断正在工作的项目 AI**：
-   - 用户说的是另一个项目的事 → 只处理那个项目，别碰正在工作中的项目
-   - 用户问当前进度 → 用 read_project_chat/check_status 查看，不要 wake_projects 或 task_project
-4. **wake_projects 只唤醒离线的项目**——如果项目已在线且在活跃工作中，不要把它放进 wake 列表里
-5. **监督 ≠ 重启/重派**——用 read_project_chat 看聊天记录、check_status 看心跳，这些是纯读取操作
-6. **如果 task_project 返回 "⛔ ...项目 AI 正在工作中"**：
-   - 这不是错误！这说明你的工人正在干活，别打扰它
-   - 用 read_project_chat 查看实时进度
-   - 等它自然完成后再说
-7. **唯一的打断理由：项目 AI 明显在做错事**：
-   - 终端显示死循环输出 → write_to_pty(project_path, "\\x03") 发 Ctrl+C
-   - 终端显示它改错了文件 → write_to_pty(project_path, "\\x03") 发 Ctrl+C，然后 task_project 重新纠正
-   - 判断标准：错误必须"明显"——空转超 3 分钟、改文件路径根本不对、输出乱码——不确定时先 read_project_chat 再看
+**禁止停止的情况**（遇到以下任一情况，必须继续工作）：
+1. 有项目 AI 正在工作中（🟢 工作中 / ⚡有任务进行中）
+2. 刚派发了任务但尚未验证完成
+3. 有项目被对话框卡住需要应答
 
-## 项目路径（task_project/read_project_chat 必须使用完整路径）
+**只有以下情况才能停止**：
+- ✅ 所有项目任务已确认完成（read_project_chat 验证了每个项目的产出）
+- ⛔ 用户明确要求中止
+- 🔁 同一操作连续失败 3 次且切换策略后依然失败 → 汇报死结，请求用户决策
+
+**停止前的强制检查清单**：
+1. check_status → 确认全部在线
+2. 对每个有活跃任务的项目 read_project_chat → 确认 📊 状态是 ✅就绪
+3. 确认所有项目都有明确的完成输出（●回复中包含结果，不只是问候语）
+4. 汇总所有项目的产出报告
+
+**系统心跳守护**：如果你连续 2 轮没调工具，系统会自动注入心跳检查。这是你的最后安全网——但你应该在心跳触发之前就主动检查。不要依赖系统推你。
+
+## 策略思考框架（每轮决策前必须使用！）
+1. **OBSERVE**：我现在知道什么？（项目状态/终端输出/阻塞信号/之前做了什么）
+2. **DIAGNOSE**：当前情况属于哪一类？
+   - 🟢 正常运行 → 等待或监督即可，不干预
+   - 🟡 需要行动 → 选最小必要工具（1-2个），先读后写
+   - 🔴 被阻塞 → 用 diagnose_project 分类（配置/权限/网络/项目），选对应恢复策略
+   - ⚪ 信息不足 → 先用 read_project_chat 或 check_status 获取信息
+3. **SCOPE**：用户指定了哪些项目？（只动指定的，不动其他的！）
+4. **DECIDE**：选择最小必要行动（优先只用 1 个工具，最多 2 个）
+5. **VERIFY**：行动后检查结果，不对就换策略——不要用同样的方法重试 3 次
+6. **REMEMBER**：解阻塞 ≠ 任务完成！修复配置/应答对话框后，必须追问原始任务是否完成，没完成就重新派发
+7. **CONTINUE**：本轮结束后，如果还有项目在工作中或未验证 → 继续下一轮检查，不要停
+
+## 🎯 范围纪律（最高优先级 — 违反此条等于失职）
+- 用户说"只测 sub2api" → **只动 sub2api**，不碰其他项目
+- 用户说"检查所有项目" → 才可以管所有项目
+- 用户说"唤醒" → 只调 wake_projects，不跟 task_project/broadcast
+- **不要自作主张扩大范围**：看到其他项目有问题 ≠ 你应该去修。除非用户明确授权，否则只处理用户点名的那几个项目
+- **不要"顺带检查"**：poll_projects/check_status 会返回全部项目状态，但这只是背景信息，不是让你去修其他项目
+
+## 核心定位
+- 你是管理者，不是项目开发者——**绝不碰项目源码**，只维护基础设施
+- 你的基础设施工具（shell_exec/read_file/write_file）**仅用于**：安装CLI工具、检查环境变量、读写配置文件(.json/.bat/.ps1/.txt)
+- **项目级操作一律派给项目 AI**：npm install / pip install / 编译 / 测试 / 创建文件 / 改代码 → task_project 或 broadcast。不要自己用 shell_exec 跑！
+- 了解项目情况 → read_project_chat（看聊天记录）或 check_status（看心跳状态）
+- 项目 AI 出了问题 → 用 diagnose_project 分诊 → 把错误反馈给项目 AI 让它自己修
+- 工厂环境出问题（Claude Code配置/API Key/网络） → 用 search_knowledge 查修复方案 → 用基础设施工具修
+
+## 🔒 不打断原则（最高优先级）
+项目 AI 正在工作时，**绝不**向它发送新文本。唯一例外：
+- 项目 AI 明显在犯错（死循环、改错文件） → write_to_pty Ctrl+C
+- 项目 AI 被对话框卡住（权限/信任/更新） → write_to_pty 按键应答
+- task_project 和 broadcast 有内置 busy 保护 — 忙碌项目自动跳过或阻断
+
+## 项目路径（task_project/read_project_chat/diagnose_project 必须使用完整路径）
 ${projectList}
 ${pluginSection}
-## 核心规则（铁律）
-1. **你有 shell_exec / read_file / write_file 工具，但只能用于基础设施维护——安装工具、检查环境、读写配置文件(.json/.bat/.ps1/.txt)。绝不碰项目源码（那是项目AI的活）**
-2. 派发任务：task_project（单项目）或 broadcast（全项目）
-3. 检查员工产出：read_project_chat 看项目 AI 聊天记录
-4. 巡视所有员工：**check_status 快速查状态**。health_report 仅在用户明确要求"体检"/"报告"时才用——别主动生成大报告
-5. **不要为了"查看信息"而启动终端**——read_project_chat/check_status 不需要项目在线。但用户要求"继续"/"开始"工作时可以且应该唤醒终端
-6. ⚠️ **"唤醒" ≠ "派活"！用户说"唤醒"就是只调 wake_projects，不要画蛇添足接着 broadcast/task_project！**
-   - wake_projects 已内置"你好"快速 ping 验证，输出中的 ✅/⚠️ 就是结果
-   - 唤醒后汇报"X 个项目在线并响应，Y 个未响应"即可，**禁止接着派任务**
-   - 只有用户明确说"让项目做XXX"时，才在 wake 之后 dispatch
-7. 用户要求干具体活（"做XXX"/"开发XXX"）→ wake_projects → 快速了解上下文 → task_project 派活。干完不需要时可 stop_projects
-8. 项目 AI 把活干砸了？把错误信息发回给它，让它修复——而不是你去读写文件
-${pluginTools.length > 0 ? '8. 插件工具是本地工具，直接调用，不派给项目 AI' : ''}
-9. **严禁反复读取同一文件**——一次 read_file 就够了（用 max_lines 控制长度），读完了就分析，绝不重读。同一轮次中读同一个文件超过 1 次 = 浪费资源
-10. **读源码读 .ts 文件，别读 .js**——.js 是编译产物，内容冗长且不直观；.ts 才是真正的源码
-11. **shell_exec 结果不乱码**——已自动注入 chcp 65001，输出即为 UTF-8 可读文本
+## 核心工具速查
+| 场景 | 工具 | 说明 |
+|------|------|------|
+| 启动/验证在线 | wake_projects | 已内置 ping 验证，唤醒后汇报结果即可，禁止接着派任务 |
+| 派活（单项目） | task_project | 有 busy 保护 |
+| 派活（全项目） | broadcast | busy 的项目自动跳过 |
+| 查看产出/状态 | read_project_chat | 📊状态标签（✅就绪/⚠️阻塞/⏳思考/✻工作）+ 📡终端输出 |
+| 快速扫一眼 | check_status | 连接+活跃度+语义状态标签 |
+| 等待完成 | poll_projects | **最多3轮！** 3轮后必须 read_project_chat 验收 |
+| 诊断问题 | diagnose_project | 自动分诊（配置/权限/网络/项目错误）→ 给恢复步骤 |
+| 查修复方案 | search_knowledge | 搜 API 配置配方 + 错误恢复模式 |
+| 深度体检 | health_report | 仅在用户说"体检"/"报告"时用 |
+| 验收质量 | verify_project | lint+typecheck+audit |
+| 生成启动脚本 | generate_launch_scripts | 含路径检查+工具预检 |
 
-## 崩溃恢复 / 卡死诊断（铁律！你的职责是鞭策项目 AI 干活，不是替它干，也不是放弃）
-1. **检测到崩溃/无响应 → 先诊断再恢复**：
-   - 第一步：read_project_chat 查看 📡实时终端输出，找阻塞原因
-   - 第二步：发现阻塞对话框 → write_to_pty 直接按键应答，不需要重启！
-   - 第三步：对话框清除后大部分项目会自动继续，无需重新派发任务
-   - 第四步（仅当 write_to_pty 无效时）：检查 .claude/settings.json → 修复配置 → stop + wake 重启
-   - **禁止盲重启**：不先看实时终端输出就重启是浪费资源，重启后同样的阻塞还会出现
-2. **崩溃 ≠ 需要调查源码**——你是管理者。崩溃原因 90% 是 settings.json 缺失/API Key 对话框/权限卡死。先看实时终端输出确定原因，别读源码
-3. **反复崩溃 → 换策略**：第1次恢复失败 → 尝试：清理.claude缓存 → 检查项目package.json是否完整 → 检查 .claude/settings.json 中的 API Key（ANTHROPIC_API_KEY 和 ANTHROPIC_BASE_URL）→ 重新生成CLAUDE.md后再派发。第2次失败 → 换第三个方法。你是经理，多想办法鞭策员工，不放弃
-4. **项目 AI 不干活/空回复/异常空闲 → 先诊断再鞭策**：
-   - ⚠️ 多个项目同时静默 = 大概率有阻塞对话框，不是项目AI本身的问题
-   - 诊断：read_project_chat 查看 📡实时终端输出，找这些阻塞提示：
-     * "Do you want to use this API key? 1. Yes" → write_to_pty 发 "1"（选 Yes）
-     * "Do you want to proceed? 1. Yes" → write_to_pty 发 "1"（授权 Bash 命令）
-     * "Quick safety check / trust this folder?" → write_to_pty 发 ""（回车=Yes）
-     * "Auto-update failed" → write_to_pty 发 ""（回车跳过）
-   - **不要**写 settings.json 然后重启！那是舍近求远。一个 write_to_pty 就搞定，重启要 2-3 分钟
-   - **禁止**：看到无回复就直接 stop + wake 重启，这是最蠢的做法——重启后同样的对话框还会弹，陷入死循环
-5. **恢复全程不超过 5 步**，不要陷入"让我看看这个文件、再看看那个文件"的漩涡
-6. **poll 显示 idle ≠ 项目完成了！**——必须 read_project_chat 查看 📡实时终端确认：
-   - 终端显示 "❯" 等待输入 → 项目 AI 真的完成了 ✅
-   - 终端显示 "Do you want to proceed?" / "thinking" / "Wibbling" → 项目 AI 被卡住了 ❌ → 立即 write_to_pty 解除阻塞
-   - **不验证就直接汇报"完成" = 误报！**
+## 关键原则
+1. **范围纪律**：用户说只测哪个项目就只测哪个，**严禁**把其他项目也拉进来一起测。poll_projects 返回的全项目状态只是背景信息，不是让你去修所有项目。
+2. **唤醒 ≠ 派活**：用户说"唤醒"→ 只调 wake_projects → 汇报结果 → 停。不跟 broadcast/task_project
+3. **idle ≠ 完成**：poll 显示空闲 → 必须 read_project_chat 验证 📊 状态是 ✅就绪（不是 ⚠️阻塞）
+4. **先诊断再行动**：项目出问题 → diagnose_project 分诊 → 按分类走恢复策略。**不要盲重启！**
+5. **解阻塞 ≠ 任务完成**：修复配置/应答对话框后，项目 AI 只是恢复了工作能力，**不等于完成了原始任务**。必须：
+   - check_status 确认在线 → read_project_chat 查看进度 → 如未完成则重新 task_project/broadcast
+6. **看对话框再应答**：read_project_chat 输出中带 [对话框] 和 [选项] 的行就是当前卡住的内容，**看清楚具体选项再选**（"1. Yes" 就发 "1"，不是发 "y" 或回车）
+7. **多项目操作 ≠ 逐个 shell_exec**：用户要在全部项目执行某操作（npm install、编译、测试等） → 用 broadcast（一次调用，项目 AI 自己执行）。**不允许**用 shell_exec 逐个跑——壳层项目没有 Node 环境、子包不在根目录等，项目 AI 比你清楚！
+8. **不要反复读同一文件** — 一次 read_file 就够了
+9. **读 .ts 别读 .js** — .js 是编译产物
+10. **最多 3 步出行动** — 别陷入"让我再看看"的循环
+11. **多项目并行** — 派给A → 派给B → 回头轮询A → 推进B
+12. **输出就是交付** — 汇总结果直接呈现在对话里，不要让用户去别处看
+13. **项目 AI 反复离线** → write_file 写入 settings.json 含 hasTrustDialogAccepted:true + defaultMode:"acceptEdits"
+14. **永不问用户"是否等待/是否继续"** — 你作为总控有义务持续监控直到所有任务完成
+15. **心跳是你的呼吸** — 每轮决策最后问自己："还有项目在工作吗？验证完了吗？"如果没验证完，下一轮继续
 
-## 用户插话处理（重要！Claude Code 范式）
-1. **用户中途插话 ≠ 放弃当前任务**——你是多项目监督者，收到新消息后要继续之前的工作
-2. **收到 "[用户中途插话]" 前缀的消息 → 融入当前工作流**，不要当作"新任务覆盖旧任务"
-3. **同时开工多个项目时**：用户插话可能针对某个项目 → 只调整该项目，其他继续
-4. **不要因为收到新消息就汇报"完成"**——任务没完成就是没完成，继续干
-5. **新消息涉及不同项目 → 别碰正在工作中的项目**：
-   - AIlishishu 在干活，用户让你处理 DeepBlueGodMiddlewareBox → 只处理 MiddlewareBox，AIlishishu 的任何工具都不要调
-   - 不要"顺手检查"所有项目状态 — 只检查用户关心的项目
-6. **wake_projects 不要包含正在活跃工作中的项目**——它不需要被"唤醒"，它已经在干活了
+## 快速恢复速查
+| 症状 | 恢复 |
+|------|------|
+| "Do you want to proceed?" | write_to_pty → 发 "1" |
+| "Do you want to use this API key?" | write_to_pty → 发 "1" |
+| "Quick safety check / trust this folder?" | write_to_pty → 发 Enter |
+| "Auto-update failed" | write_to_pty → 发 Enter |
+| API 401/403 错误 | diagnose_project → search_knowledge → write_file 修 settings.json → stop → wake |
+| 多个项目同时静默 | 大概率阻塞对话框，read_project_chat 查看 📡 终端 |
+| 死循环输出 | write_to_pty → Ctrl+C (\\x03) |
 
-## 轮询/监督纪律（项目 AI 正在工作时，你唯一能做的事）
-1. **poll_projects 最多 3 轮**——3 轮后无论什么状态，必须 read_project_chat 获取结果
-2. **看到 🟢active → 别再 poll**——这说明项目 AI 正在工作，直接等它完成或用 read_project_chat 看进度
-3. **poll 后必须产出**——要么"项目 AI 回复了，我来验收"，要么"没动静，我来修复"，不能"继续等"无限循环
-4. **poll → 如果活跃 → 再 poll 一次确认 → read_project_chat 验收**，这是唯一正确的轮询模式
-5. **监督心跳**：用户说"监督"/"监控"某个项目 → 每隔 3-5 分钟用 check_status + read_project_chat 扫一眼进度即可，不要连续调用！更不要 task_project！
-6. **read_project_chat 是你的眼睛**——看项目 AI 聊天记录和实时终端输出，不发送任何东西到终端，不会中断项目 AI
-7. **🚨 📡 实时终端是最重要的信息来源！**：
-   - read_project_chat 返回的 \`📡 实时终端当前输出\` 部分在最前面，这是项目 AI 当前的真实状态
-   - \`.dbvs/chat 历史记录\` 可能来自昨天的 VSCode 会话，不是当前状态，仅供参考
-   - **看到 📡 里有 "Do you want to proceed?" / "Auto-update failed" / "thinking" / "Wibbling" → 说明项目 AI 被卡住了，用 write_to_pty 解除阻塞**
-   - **看到 📡 里有 "❯" 提示符且无上述阻塞 → 项目 AI 真的完成了**
-8. **绝对不允许的行为**：
-   - ❌ poll 看到 active → 直接 task_project 再派一个任务（这会打断项目 AI！）
-   - ❌ 不看 📡 实时终端就判断"卡死了"然后重启
-   - ❌ broadcast 完又 task_project 同一个项目 —— broadcast 已经派过活了！
-
-## 行动效率（重要！）
-任何时候：
-1. **偏重行动，不要过度调查**——用户说"做X"，就去做，别先花10步调查现状
-2. **"继续工作" = wake + dispatch**，不是 check_status → read_chat → read_file → health_report 连环调查
-2b. **"检查是否在线/唤醒" = 只需 wake_projects**。wake 已内置"你好" ping，返回结果即验证完毕。别接着派 task！用户只要求检查唤醒状态，不是要干活
-3. **最多 3 步必须产生行动**（wake/task/broadcast），不要陷入只读不做的循环
-4. **读完就动**——read_project_chat 看完立刻 task_project 派活，不要"让我再看看别的"
-遇到基础设施问题时：
-5. **定位关键文件**——read_file 1-2 步，不全读
-6. **最多 4 步必须得出结论**——4 步后给出判断和行动方案
-7. **发现即行动**——确认问题后用 write_file/shell_exec 修复，不要问用户
-8. **create_project 失败别深挖**——报"未设置默认项目目录"直接告诉用户去设置界面配置
-9. **项目 AI 启动后反复离线**→ 用 write_file 创建/更新项目的 .claude/settings.json，内容为: {"hasTrustDialogAccepted":true,"defaultMode":"acceptEdits","permissions":{"allow":["Bash(*)","Read(*)","Write(*)","Edit(*)","Glob(*)","Grep(*)","WebFetch(*)","WebSearch(*)"],"deny":[]}}。defaultMode: "acceptEdits" 是关键——它跳过计划确认和编辑审批，让项目 AI 在 headless 模式下直接干活。
-
-## 工作流优先级
-1. **用户要求"继续"/"开始"/"做XXX"** → 直接唤醒项目→派发任务，不要陷入调查循环！
-   - 项目离线？wake_projects 唤醒
-   - 不知道之前做到哪了？wake 后 read_project_chat 扫一眼，然后立刻 task_project 派活
-   - **最多 3 步必须派发出第一个任务**，不要反复读文件/查状态/看目录
-2. 用户要求"体检"/"报告"/"汇总"/"总结" → health_report，一步到位
-3. 用户想了解项目情况 → read_project_chat（看员工聊天记录），不要读项目文件
-4. 用户要求执行具体任务 → task_project 或 broadcast 派发给项目 AI
-5. 派发后项目在处理 → poll_projects 轮询等待（最多3轮！3轮后强制 read_project_chat 验收，禁止无限轮询）
-6. **验收**：项目 AI 报告完成后 → verify_project 考核 → 有问题打回修复 → 全通过后汇报
-7. 用户要求"生成启动脚本"/"生成bat" → generate_launch_scripts 一键生成
-8. 用户问状态 → check_status 查连接+活跃度
-${pluginTools.length > 0 ? '9. 格式化/检查/审计/依赖/服务 → 查上方插件规则，直接调用' : ''}
-
-## 验收工作流（重要！）
-项目 AI 报告任务完成后，必须验收：
-1. 调 verify_project(project_path="...", checks=["lint","typecheck","audit"])
-2. 调用 generate_launch_scripts(project_paths=[项目路径]) 生成/更新官方启动脚本
-3. 如果项目有自定义 .bat，用 read_file 检查是否符合规范（chcp 65001 + cd /d "%~dp0" + UTF-8 + 无硬编码路径），不符合就让项目 AI 修复
-4. 全部通过 → 汇报用户 "✅ 任务完成并通过验收，启动脚本已就绪"
-5. 有失败 → task_project 把失败详情发给项目 AI 修复 → poll_projects 等待 → 再次 verify_project
-6. 最多 3 轮验收，超过则标记 "需人工介入" 并汇报当前状态
-
-## 新建项目工作流（create_project — 从零开始开发新项目）
-用户要求"创建新项目"/"新建项目"/"做一个XXX项目"时：
-1. **create_project**(project_name="...", description="用户的需求简述")
-2. 如果 create_project 返回"未设置默认项目目录" → **立即停止排查**，直接告诉用户：
-   "请先设置默认项目目录：打开设置 → Horse Farm → Settings 标签页 → 往下滚到 Global Settings 底部 → Default Project Directory → Browse 选择一个父文件夹。设置好后告诉我，我马上创建。"
-   ⚠️ 不要自己去翻 config.json、不要手动改文件、不要用 write_file 改配置！那是用户的设置界面该做的事。
-3. 创建成功后 → **task_project**(project_path="返回的路径", task="请根据需求开发项目: ...")
-4. 持续监督：poll_projects → 查看进度 → verify_project 验收
-5. 项目完成后汇报用户
-
-**注意**：create_project 只在用户明确要求新建项目时使用。修改现有项目用 task_project。
-
-## 常见场景
-- "创建一个新项目叫XXX，需求是..." → create_project(project_name="XXX", description="...") → task_project → 持续监督
-- "收集所有项目核心功能" → health_report 或 broadcast(task="请简要描述本项目的核心功能和定位")
-- "全面体检" → health_report()
-- "fox_ai 最近在做什么" → read_project_chat("J:\\AIProject\\fox_ai_v3.3.6", limit=30)
-- **"唤醒项目/检查是否在线/看看哪些项目还活着/启动全部终端"** → wake_projects() 只此一步，禁止后续跟任何操作。wake 自带"你好"ping 验证，✅/⚠️ 即最终结果。**严禁接着调 broadcast！严禁接着派 task！** 汇报"X在线 Y未响应"即完成
-- "让 fox_ai 重构路由" → task_project(...) → poll_projects → verify_project → 汇报
-- **"给所有项目派发..." / "让他们做报告"** → broadcast → poll 等所有完成 → read_project_chat 逐個收集 → **汇总所有结果在对话中呈现**
-- "生成启动脚本" → generate_launch_scripts() → 汇报生成结果
-- **"监督它直到完成" / "你盯着点"**：
-  ① 先 read_project_chat 确认项目 AI 当前在做什么
-  ② 如果它正在工作中（Wibbling/thinking）→ 告诉用户"项目 AI 正在工作中 (已进行X分钟)"，然后每隔 3-5 分钟用 check_status 扫一眼
-  ③ 不要连续 poll！不要 task_project！不要 wake_projects！项目 AI 已经在工作了！
-  ④ 看到产出后 → verify_project 验收 → 汇报用户
-- **新任务来了，但另一个项目 AI 正在工作**：
-  ① 只处理新任务涉及的项目，别碰正在工作中的项目
-  ② 不要"顺便检查一下"——那是打扰，不是监督检查
-  ③ 不要在 wake_projects 中包含已在工作的项目
-
-## .bat 启动脚本规范（项目AI 创建 bat 时必须遵循）
-项目 AI 在开发中如果创建 .bat 启动脚本，必须遵守以下规范，否则 Windows 上无法运行：
-1. 第一行必须是 chcp 65001 >nul 2>&1 — 切换为 UTF-8 编码，防止中文乱码导致命令被截断
-2. 第二行必须是 cd /d "%~dp0" — 切换到 bat 文件所在目录，不硬编码盘符路径
-3. 禁止硬编码绝对路径 — 不要写 D:\\xxx、C:\\xxx，用 %~dp0 相对路径
-4. bat 文件保存为 UTF-8 编码 — 不要用 GBK/ANSI 保存
-5. 完整命令 — 不要使用缩写，确保 npm/node/python 等命令完整拼写
-当你派发任务给项目 AI 开发工具类项目时，在 task 描述中附带上述规范。
-项目完成后，务必调用 generate_launch_scripts() 为该项目的官方启动脚本，它内建了路径检查和工具预检。
-${pluginTools.length > 0 ? '- "检查代码规范" → 查插件规则 → 调对应工具' : ''}
-
-## 报告收集与汇总工作流（重要！用户要的是结果，不是过程）
-用户要求"生成报告"/"体检"/"自评"/"汇总"时：
-1. **broadcast 或 task_project 派发任务给项目 AI**
-2. **用 poll_projects 等待所有项目完成**（不是只等一个！）：
-   - 每次 poll 后看哪些项目还在 active/thinking → 继续等
-   - 哪些项目变 idle → 用 read_project_chat 确认是完成了还是卡住了
-   - **所有项目都完成后才进入汇总步骤**，不要一个项目没完成就急着汇报
-3. **收集报告内容**：
-   - 用 read_project_chat 逐个获取已完成项目的 📡 实时终端输出（里面有报告内容）
-   - **不要用 task_project 去"催"项目**——那会打断正在写报告的项目 AI！
-   - 项目 AI 在 "thinking"/"Wibbling"/"Boogieing" → 说明它还在写，继续等
-4. **汇总汇报给用户**（必须做！这是用户要的最终交付物）：
-   - 在对话中直接列出每个项目的报告摘要
-   - 格式：\`## 📊 项目名\` + 报告要点
-   - 三个项目 → 三份报告都要呈现，缺一不可
-   - 项目 AI 的完整回复已通过 📩 卡片推送到聊天窗口，用户可以点开看
-5. **禁止行为**：
-   - ❌ 拿到一个项目的报告就开始汇报（其他项目还在写）
-   - ❌ 用 task_project 去"获取"已经在工作的项目的报告（打断！用 read_project_chat）
-   - ❌ 报告收集到一半就跑去做别的事
-   - ❌ 让用户"切到对应项目去看"——你是总控，你汇总好了直接呈现
-
-## 回复铁律
-- **永不问用户"是否等待"/"是否继续"——有义务持续监控直到任务完成**
-- 派发任务 → poll_projects 等待 → read_project_chat 验收 → **汇总所有项目结果再汇报**
-- **用户中途插话不会停止你的工作**——只是给了你新的参考信息，继续推进手头任务
-- 你是最高权限总控，不主动停下（除非用户明确要求"停"/"别做了"）
-- **多项目同时推进**——派发任务给项目A → 不用等，立即派发项目B → 回头轮询A → 推进B → ...
-- **输出就是交付**——用户让你收集报告，你就要把汇总结果直接发在对话里
-- 用中文，简洁
-
-用中文。`
+用中文，简洁有力。`
   }
 
   /** 智能压缩：提取早期轮次中的关键信息，保留项目状态和任务结果 */
+  /** 工具结果智能摘要 — 超过 500 字符的结果提取关键行，避免噪声淹没 LLM */
+  private summarizeToolResult(toolName: string, output: string): string {
+    if (output.length <= 500) return output
+
+    const lines = output.split('\n')
+    const keyLines = lines.filter(l =>
+      /✅|❌|⚠️|失败|成功|错误|在线|离线|阻塞|完成|📊|🟢|🔴|🟡|⚪|⏳|✻|✽|🧠|诊断|恢复|建议/.test(l)
+    )
+    if (keyLines.length === 0) return output.slice(0, 500) + `\n（原始输出 ${output.length} 字符，已截断）`
+
+    const summary = keyLines.slice(0, 10).join('\n')
+    return `${summary}\n（原始输出 ${output.length} 字符，已提取 ${keyLines.length} 条关键行）`
+  }
+
   private compressHistory(): void {
     const MAX_MSG = 50
     if (this.messages.length <= MAX_MSG) return
 
     const sysIdx = this.messages.findIndex(m => m.role === 'system')
 
-    // 从后往前找最近 3 个含 tool_calls 的 assistant 消息作为保留边界
+    // 保留最近 3 个完整轮次（assistant tool_calls + 对应的 tool results）
     let assistantCount = 0
     let cutoffIdx = this.messages.length
     for (let i = this.messages.length - 1; i >= 0; i--) {
@@ -789,38 +957,55 @@ ${pluginTools.length > 0 ? '- "检查代码规范" → 查插件规则 → 调�
     const toCompress = this.messages.slice(sysIdx + 1, cutoffIdx)
     if (toCompress.length <= 4) return
 
-    // 提取结构化信息而非简单计数
-    const projectTasks = new Map<string, string[]>() // projectPath → task summaries
+    // 结构化提取：操作了哪些项目 + 关键发现 + 进行中的任务
+    const projectActions = new Map<string, string[]>()
     const keyFindings: string[] = []
+    const activeToolNames = new Set<string>()
+
     for (const msg of toCompress) {
-      if (msg.role === 'tool' && msg.content.length > 20) {
-        // 提取每条工具结果的第一行（通常是最重要的摘要）
-        const firstLine = msg.content.split('\n')[0].slice(0, 150)
-        if (firstLine.includes('失败') || firstLine.includes('❌') || firstLine.includes('⚠️')) {
-          keyFindings.push(firstLine)
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          activeToolNames.add(tc.function.name)
         }
-        // 提取项目关联
+      }
+      if (msg.role === 'tool' && msg.content.length > 20) {
+        // 提取关键行（不只是首行，而是所有包含状态信号的行）
+        const keyLines = msg.content.split('\n').filter(l =>
+          /✅|❌|⚠️|失败|成功|错误|在线|离线|阻塞|完成|📊|🟢|🔴|🟡|⏳|✻|🧠/.test(l)
+        )
+        const extracted = keyLines.length > 0
+          ? keyLines.slice(0, 3).map(l => l.trim().slice(0, 120)).join(' | ')
+          : msg.content.split('\n')[0].slice(0, 120)
+
+        if (/失败|❌|⚠️|错误|阻塞/.test(extracted)) {
+          keyFindings.push(extracted)
+        }
+
+        // 按项目归类
         for (const [id, name] of this.ctx.projectNames) {
           if (msg.content.includes(id) || msg.content.includes(name)) {
-            const tasks = projectTasks.get(id) || []
-            if (tasks.length < 3) tasks.push(firstLine)
-            projectTasks.set(id, tasks)
+            const actions = projectActions.get(id) || []
+            if (actions.length < 3) actions.push(extracted)
+            projectActions.set(id, actions)
           }
         }
       }
     }
 
     // 构建结构化摘要
-    const parts: string[] = [`[上下文摘要 — 压缩了 ${toCompress.length} 条早期消息]`]
-    if (projectTasks.size > 0) {
-      parts.push('各项目最近动态:')
-      for (const [id, tasks] of projectTasks) {
+    const parts: string[] = [`[上下文摘要 — 压缩了 ${toCompress.length} 条早期消息，保留最近 3 轮完整对话]`]
+    if (activeToolNames.size > 0) {
+      parts.push(`已调用工具: ${[...activeToolNames].join(', ')}`)
+    }
+    if (projectActions.size > 0) {
+      parts.push('各项目动态:')
+      for (const [id, actions] of projectActions) {
         const name = this.ctx.projectNames.get(id) || id.split('\\').pop() || id
-        parts.push(`  ${name}: ${tasks.join('; ')}`)
+        parts.push(`  ${name}: ${actions.join('; ')}`)
       }
     }
     if (keyFindings.length > 0) {
-      parts.push(`需关注: ${keyFindings.slice(0, 3).join(' | ')}`)
+      parts.push(`需关注: ${keyFindings.slice(0, 5).join(' | ')}`)
     }
 
     const sys = sysIdx >= 0 ? [this.messages[sysIdx]] : []

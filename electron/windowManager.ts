@@ -58,7 +58,12 @@ export class WindowManager {
 
     this.mainWindow.once('ready-to-show', () => {
       this.mainWindow?.show()
-      // DevTools: 按 F12 手动打开
+    })
+    // F12 切换 DevTools
+    this.mainWindow.webContents.on('before-input-event', (_e, input) => {
+      if (input.type === 'keyDown' && input.key === 'F12') {
+        this.mainWindow?.webContents.toggleDevTools()
+      }
     })
 
     this.mainWindow.on('close', (e) => {

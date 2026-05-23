@@ -79,7 +79,9 @@ echo ========================================
 pause
 `
     const batPath = path.join(projectPath, BAT_FILENAME)
-    fs.writeFileSync(batPath, batContent, 'utf-8')
+    // UTF-8 BOM: Windows CMD 默认用系统 ANSI 编码(GBK)读取 .bat，中文会乱码。
+    // BOM 头告诉 Windows 该文件是 UTF-8，CMD 才能正确解析中文字符。
+    fs.writeFileSync(batPath, '﻿' + batContent, 'utf-8')
     return { success: true, command: launchCmd }
   } catch (err) {
     return { success: false, command: '', message: String(err) }

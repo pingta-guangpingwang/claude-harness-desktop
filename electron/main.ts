@@ -235,9 +235,20 @@ app.on('before-quit', () => {
 // 防止多个实例
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
+  console.log('[CHD] ⚠️ 检测到已有实例在运行，退出当前进程')
   app.quit()
 } else {
   app.on('second-instance', () => {
+    console.log('[CHD] 收到 second-instance 事件，显示主窗口')
     windowManager.showMainWindow()
   })
 }
+
+// 全局异常捕获 — 防止未处理的异常导致静默退出
+process.on('uncaughtException', (err) => {
+  console.error('[CHD] 未捕获异常:', err.message)
+  console.error(err.stack)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[CHD] 未处理的 Promise 拒绝:', reason)
+})

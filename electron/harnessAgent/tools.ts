@@ -1,10 +1,11 @@
 // 驾驭智能体 — 内置工具实现
 import type { AgentTool, AgentContext, ToolResult } from './types'
 import { registerTool, getAllTools, executeTool } from './toolRegistry'
-import { spawnPtySession, killPtySession, getPtyStatus, writeToPty, sendAndCollect, getRecentPtyOutput } from '../modules/ptyManager.js'
+import { spawnPtySession, killPtySession, getPtyStatus, writeToPty, sendAndCollect, getRecentPtyOutput, getPtyErrorSnapshot } from '../modules/ptyManager.js'
 import { taskQueue, type AgentTask } from './taskQueue.js'
 import { db } from '../modules/database.js'
 import { notifyProjectAdded } from '../modules/projectNotifier.js'
+import { searchKnowledge, diagnoseErrors } from './knowledge.js'
 import fs from 'fs'
 import path from 'path'
 
@@ -171,7 +172,7 @@ const writePtyTool: AgentTool = {
 
 const checkStatusTool: AgentTool = {
   name: 'check_status',
-  description: '检查全部项目的心跳状态（实时查询 PTY 连接状态+最后活跃时间），用于判断哪些项目正在工作中、哪些空闲、哪些离线。派发任务后用此工具轮询项目状态。',
+  description: '检查全部项目的心跳状态 + 语义状态（实时查询 PTY 连接状态+最后活跃时间+终端内的状态标签），用于判断哪些项目正在工作中、哪些卡在对话框、哪些空闲。派发任务后用此工具轮询项目状态。优先用此工具扫一眼全局，发现异常再 read_project_chat 深入查看。',
   parameters: { type: 'object', properties: {} },
   group: 'control',
   isReadOnly: true,
@@ -181,6 +182,7 @@ const checkStatusTool: AgentTool = {
     const lines: string[] = []
     let online = 0
     let working = 0
+    let blocked = 0
     for (const id of ctx.projectIds) {
       const name = ctx.projectNames.get(id) || id.split('\\').pop() || id
       const ptyStatus = getPtyStatus(id)
@@ -200,6 +202,29 @@ const checkStatusTool: AgentTool = {
         busyTag = ` ⚡有任务进行中(${busyElapsedStr}): "${busyInfo.task.slice(0, 40)}..."`
       }
 
+      // 语义状态：快速扫描最近终端输出中的状态信号
+      let semanticTag = ''
+      if (isOnline) {
+        const recent = getRecentPtyOutput(id, 40)
+        if (recent) {
+          // 从清洗后的输出中提取状态
+          const statusMatch = recent.match(/📊 当前状态:\s*(.+)/)
+          if (statusMatch) {
+            const s = statusMatch[1].trim()
+            if (s.startsWith('⏳') || s.startsWith('🧠')) {
+              semanticTag = ` ${s}`
+            } else if (s.startsWith('✻') || s.startsWith('✽')) {
+              semanticTag = ` ${s}`
+            } else if (s.startsWith('⚠️')) {
+              semanticTag = ` ${s}`
+              blocked++
+            } else if (s.startsWith('✅')) {
+              semanticTag = ` ${s}`
+            }
+          }
+        }
+      }
+
       let status: string
       if (!isOnline) {
         status = '🔴 离线'
@@ -210,15 +235,30 @@ const checkStatusTool: AgentTool = {
         }
       } else if (isWorking) {
         status = '🟢 工作中'
-      } else if (secSinceLastData < 300) {
-        status = `🟡 空闲(${secSinceLastData}s前有活动)`
       } else {
-        status = `⚪ 无活动(${Math.floor(secSinceLastData / 60)}min前)`
+        // 项目在线但空闲 — 清除过期 busy 标记（>2分钟无 PTY 活动 = 已完成或已停止）
+        if (busyInfo && secSinceLastData > 120) {
+          markProjectIdle(id)
+          busyTag = ''
+        }
+        if (secSinceLastData < 300) {
+          status = `🟡 空闲(${secSinceLastData}s前有活动)`
+        } else {
+          status = `⚪ 无活动(${Math.floor(secSinceLastData / 60)}min前)`
+        }
       }
       const detail = isOnline && ptyStatus.pid ? ` PID:${ptyStatus.pid}` : ''
-      lines.push(`${status} — ${name}${detail}${busyTag}`)
+      lines.push(`${status} — ${name}${detail}${busyTag}${semanticTag}`)
     }
-    lines.unshift(`总计: ${online}/${ctx.projectIds.length} 在线, ${working} 工作中, ${activeProjectTasks.size} 有活跃任务`)
+    const summaryParts = [
+      `总计: ${online}/${ctx.projectIds.length} 在线, ${working} 工作中`,
+    ]
+    if (activeProjectTasks.size > 0) summaryParts.push(`${activeProjectTasks.size} 有活跃任务`)
+    if (blocked > 0) summaryParts.push(`⚠️ ${blocked} 个项目被阻塞（对话框/权限/更新提示）`)
+    lines.unshift(summaryParts.join(', '))
+    if (blocked > 0) {
+      lines.push(`\n⚠️ 检测到阻塞项目！用 read_project_chat 查看具体终端输出，write_to_pty 应答对话框即可解除阻塞（不要重启！）`)
+    }
     return { success: true, output: lines.join('\n') }
   },
 }
@@ -491,7 +531,7 @@ const taskProjectTool: AgentTool = {
 
 const pollProjectsTool: AgentTool = {
   name: 'poll_projects',
-  description: '低开销轮询指定项目的 PTY 活跃状态。调用后等待 20-40 秒，返回每个项目的活跃/空闲状态和最近活动时间。**严格限制：最多调用 3 轮。3 轮后必须 read_project_chat 验收，禁止无限轮询。** 看到活跃状态立即验收，不要继续等。',
+  description: '低开销轮询指定项目的 PTY 活跃状态 + 语义状态。调用后等待 20-40 秒，返回每个项目的活跃/空闲状态、最近活动时间和终端内的状态标签（思考中/工作中/被对话框卡住/就绪）。**严格限制：最多调用 3 轮。3 轮后必须 read_project_chat 验收，禁止无限轮询。** 看到活跃状态立即验收，不要继续等。',
   parameters: {
     type: 'object',
     properties: {
@@ -529,6 +569,7 @@ const pollProjectsTool: AgentTool = {
     const lines: string[] = [`⏱️ 等待 ${waitSec}s 后项目状态:`]
     let activeCount = 0
     let changedCount = 0
+    let blockedCount = 0
 
     for (const id of paths) {
       const name = ctx.projectNames.get(id) || id.split('\\').pop() || id
@@ -541,33 +582,67 @@ const pollProjectsTool: AgentTool = {
       const prevLastData = before.get(id) || 0
       const hasNewData = s.lastDataAt > prevLastData
 
+      // 语义状态标签
+      let semanticTag = ''
+      const recent = getRecentPtyOutput(id, 40)
+      if (recent) {
+        const statusMatch = recent.match(/📊 当前状态:\s*(.+)/)
+        if (statusMatch) {
+          const st = statusMatch[1].trim()
+          if (st.startsWith('⚠️')) { semanticTag = ` ${st}`; blockedCount++ }
+          else if (st.startsWith('⏳') || st.startsWith('🧠')) semanticTag = ` ${st}`
+          else if (st.startsWith('✻') || st.startsWith('✽')) semanticTag = ` ${st}`
+          else if (st.startsWith('✅')) semanticTag = ` ${st}`
+        }
+      }
+
       if (secSinceLastData < 15) {
-        lines.push(`  🟢 ${name}: 活跃中 (${secSinceLastData}s前有数据)${hasNewData ? ' ← 本轮有新数据' : ''}`)
+        lines.push(`  🟢 ${name}: 活跃中 (${secSinceLastData}s前有数据)${hasNewData ? ' ← 本轮有新数据' : ''}${semanticTag}`)
         activeCount++
         if (hasNewData) changedCount++
       } else if (secSinceLastData < 60) {
-        lines.push(`  🟡 ${name}: 可能已完成 (${secSinceLastData}s前最后活动)${hasNewData ? ' ← 本轮有新数据' : ''}`)
+        lines.push(`  🟡 ${name}: 可能已完成 (${secSinceLastData}s前最后活动)${hasNewData ? ' ← 本轮有新数据' : ''}${semanticTag}`)
         if (hasNewData) changedCount++
       } else if (secSinceLastData < 300) {
-        lines.push(`  ⚪ ${name}: 空闲 ${Math.floor(secSinceLastData / 60)}min`)
+        lines.push(`  ⚪ ${name}: 空闲 ${Math.floor(secSinceLastData / 60)}min${semanticTag}`)
       } else {
-        lines.push(`  💤 ${name}: 长时间无活动 ${Math.floor(secSinceLastData / 60)}min`)
+        lines.push(`  💤 ${name}: 长时间无活动 ${Math.floor(secSinceLastData / 60)}min${semanticTag}`)
       }
     }
 
-    lines.unshift(`活跃: ${activeCount}/${paths.length}, 本轮新数据: ${changedCount}`)
-    // ⚠️ 关键提醒：idle ≠ done！必须验证终端是否真的完成了还是被卡住了
-    const idleButShouldBeWorking = paths.filter(id => {
-      const s = getPtyStatus(id)
-      const secSinceLastData = s.lastDataAt > 0 ? Math.floor((Date.now() - s.lastDataAt) / 1000) : 99999
-      return s.connected && secSinceLastData >= 15 && activeProjectTasks.has(id)
-    })
-    if (idleButShouldBeWorking.length > 0) {
-      const names = idleButShouldBeWorking.map(id => ctx.projectNames.get(id) || id.split('\\').pop() || id)
-      lines.push(`\n⚠️ ${names.join(', ')} 有活跃任务但本轮变空闲了 — 可能被阻塞对话框卡住！`)
-      lines.push(`🚨 立即用 read_project_chat 查看 📡实时终端输出，确认没有 "Do you want to proceed?" / "API Key" / "Auto-update failed" 等阻塞提示`)
-    } else if (changedCount === 0 && activeCount === 0) {
-      lines.push(`\n💡 所有项目空闲 — 用 read_project_chat 确认它们是完成了还是被卡住了。idle ≠ done！`)
+    const summaryParts = [`活跃: ${activeCount}/${paths.length}, 本轮新数据: ${changedCount}`]
+    if (blockedCount > 0) summaryParts.push(`⚠️ ${blockedCount} 个被阻塞`)
+    lines.unshift(summaryParts.join(', '))
+
+    // 有阻塞 → 明确指出并给出行动指引
+    if (blockedCount > 0) {
+      lines.push(`\n⚠️ 检测到 ${blockedCount} 个项目被对话框卡住！用 read_project_chat 查看具体终端输出，write_to_pty 应答对话框即可解除阻塞（不要重启！重启后同样的对话框还会弹）`)
+    } else {
+      const idleButShouldBeWorking = paths.filter(id => {
+        const s = getPtyStatus(id)
+        const secSinceLastData = s.lastDataAt > 0 ? Math.floor((Date.now() - s.lastDataAt) / 1000) : 99999
+        return s.connected && secSinceLastData >= 15 && activeProjectTasks.has(id)
+      })
+      // 自动清除过期 busy 标记：空闲 >2 分钟 → 任务已完成或已停止
+      let autoCleared = 0
+      for (const [projPath, busyInfo] of activeProjectTasks) {
+        const s = getPtyStatus(projPath)
+        const idleSec = s.lastDataAt > 0 ? Math.floor((Date.now() - s.lastDataAt) / 1000) : 99999
+        if (idleSec > 120 || !s.connected) {
+          markProjectIdle(projPath)
+          autoCleared++
+        }
+      }
+      if (autoCleared > 0) {
+        lines.push(`\n🧹 自动清理了 ${autoCleared} 个过期 busy 标记（空闲 >2min），任务实际已完成。`)
+      }
+
+      if (idleButShouldBeWorking.length > 0) {
+        const names = idleButShouldBeWorking.map(id => ctx.projectNames.get(id) || id.split('\\').pop() || id)
+        lines.push(`\n⚠️ ${names.join(', ')} 有活跃任务但本轮变空闲了 — 用 read_project_chat 确认是完成了还是被卡住`)
+      } else if (changedCount === 0 && activeCount === 0 && autoCleared === 0) {
+        lines.push(`\n💡 所有项目空闲 — 用 read_project_chat 确认是完成了还是被卡住。idle ≠ done！`)
+      }
     }
     return { success: true, output: lines.join('\n') }
   },
@@ -638,6 +713,60 @@ const addFollowUpTool: AgentTool = {
 
 // ============== P1 情报收集工具（读取项目 AI 上下文） ==============
 
+/** 剥离 ANSI 转义序列 + TUI 状态行噪声。
+ *  用于清洗 .dbvs/chat JSON 中的终端原始内容，使 Agent 可读。 */
+function stripAnsiAndNoise(raw: string): string {
+  let out = raw
+    // OSC 序列 (ESC ] ... BEL/ST)
+    .replace(/\x1b\][^\x07]*\x07/g, '')
+    // CSI 序列 (ESC [ ... final-byte)
+    .replace(/\x1b\[[0-9;:?>=<]*[A-Za-z@-~]/g, '')
+    // 其他 ESC 序列
+    .replace(/\x1b[#-Z\\\]^_`a-z~|]/g, '')
+    .replace(/\x1b[>=]/g, '')
+    .replace(/\x1b/g, '')
+    // CR/LF 处理
+    .replace(/\r\n/g, '\n')
+    .replace(/[^\n]*\r(?!\n)/g, '')
+
+  // 逐行过滤 TUI 噪音
+  const lines = out.split('\n')
+  const filtered = lines.filter(line => {
+    const t = line.trim()
+    if (!t) return false
+    // 纯 TUI 动画帧
+    if (/^[✻✽✢✶✹✺✼✾·⏳🧠●○◉◎⏺⏸▶▸*\s▐▌▛▜▟▙▘▝▀▄█▊▎▌▏▍▋│├┤┼╺╍┄┅┈┉🔄]+$/.test(t)) return false
+    // TUI 状态行（spinner + 动词 + 耗时 + token）
+    if (/^[✻✽✢✶✹✺✼✾·*\b].*(?:think|work|brew|scurry|simmer|boogie|wibbl|crystal|gallop|saut|enchant|embellish|dilly|temper|putter|churn|architect|decipher|spelunk|craft)/i.test(t) && t.length < 80) return false
+    // 状态变体
+    if (/(?:almost|nearly)\s+done\s+(?:think|work)/i.test(t) && t.length < 80) return false
+    if (/^(?:still|more)\s+(?:think|work)/i.test(t)) return false
+    if (/^thought\s+for\s+\d+s?\)?/i.test(t)) return false
+    // token / 耗时行
+    if (/(?:↓|↑)\s*\d+\s*tokens/i.test(t) && t.length < 60) return false
+    if (/\d+m\s*\d+s\s*[·•]\s*(?:↓|↑)/i.test(t) && t.length < 60) return false
+    // 分隔线
+    if (/^[-━─=–—╭╮╰╯├┤┼]{6,}$/.test(t)) return false
+    // TUI 模式指示器
+    if (/^(?:acceptedits\s*(?:on|off)|esctointerrupt|ctrl\+o to expand)$/i.test(t)) return false
+    if (/^\*\s*high\s*·\s*\/effort/i.test(t)) return false
+    // 系统消息
+    if (/^Resume this session with:/i.test(t)) return false
+    if (/Claude Code 会话已结束/i.test(t)) return false
+    if (/^Claude Code 终端已启动/i.test(t)) return false
+    if (/^Claude Code 已就绪/i.test(t)) return false
+    if (/^Welcome back/i.test(t)) return false
+    if (/^Tips for getting/i.test(t)) return false
+    if (/^Run \/init/i.test(t)) return false
+    if (/^What.s new/i.test(t)) return false
+    if (/API Usage Billing/i.test(t)) return false
+    // 纯 TUI 提示框
+    if (/^[\s]*⎿\s*Tip:/i.test(t)) return false
+    return true
+  })
+  return filtered.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 const readProjectChatTool: AgentTool = {
   name: 'read_project_chat',
   description: '读取指定项目 Claude Code 最近的聊天记录。用于了解项目 AI 最近做了什么、有什么输出、当前状态如何。不需要向项目发送任何任务，直接读取已有的对话内容。支持指定读取最近 N 条消息或最近 N 小时的记录。',
@@ -674,13 +803,25 @@ const readProjectChatTool: AgentTool = {
     const name = ctx.projectNames.get(match) || match.split('\\').pop() || match
 
     try {
+      // ⚠️ 实时 PTY 终端输出 MUST COME FIRST — 无论 .dbvs/chat 是否存在！
+      const liveOutput = getRecentPtyOutput(match, 500)
+      const liveSection = liveOutput
+        ? `📡 实时终端当前输出 (最近500行):\n${'─'.repeat(50)}\n${liveOutput}\n${'─'.repeat(50)}`
+        : ''
+
       const chatDir = path.join(match, '.dbvs', 'chat')
       if (!fs.existsSync(chatDir)) {
-        return { success: true, output: `📭 ${name}: 暂无聊天记录（.dbvs/chat 目录不存在）` }
+        const fallback = liveSection
+          ? `📋 ${name}: .dbvs/chat 目录不存在。\n\n${liveSection}`
+          : `📭 ${name}: .dbvs/chat 目录不存在，实时终端也无输出`
+        return { success: true, output: fallback }
       }
       const files = fs.readdirSync(chatDir).filter(f => f.endsWith('.json'))
       if (files.length === 0) {
-        return { success: true, output: `📭 ${name}: 暂无聊天记录` }
+        const fallback = liveSection
+          ? `📋 ${name}: .dbvs/chat 暂无记录。\n\n${liveSection}`
+          : `📭 ${name}: .dbvs/chat 暂无记录，实时终端也无输出`
+        return { success: true, output: fallback }
       }
 
       // 按修改时间排序，取最新的 session
@@ -700,35 +841,39 @@ const readProjectChatTool: AgentTool = {
           const raw = fs.readFileSync(path.join(chatDir, file), 'utf-8')
           const session = JSON.parse(raw)
           const msgs = session.messages || []
-          for (const msg of msgs.reverse()) {
+          for (const msg of msgs) {
             if (messages.length >= limit) break
             const ts = new Date(msg.timestamp).getTime()
             if (cutoff > 0 && ts < cutoff) continue
             const roleTag = msg.role === 'user' ? '👤' : msg.role === 'assistant' ? '🤖' : '📢'
             const time = msg.timestamp ? new Date(msg.timestamp).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''
-            messages.push(`[${time}] ${roleTag} ${msg.content.slice(0, 500)}`)
+            // ANSI 剥离 + TUI 噪声清洗，确保聊天内容对 Agent 可读
+            const clean = stripAnsiAndNoise(String(msg.content))
+            if (!clean) continue  // 清洗后无内容则跳过
+            messages.push(`[${time}] ${roleTag} ${clean.slice(0, 800)}`)
             totalMsgs++
           }
         } catch { /* skip corrupt */ }
       }
 
-      // ⚠️ 实时 PTY 终端输出放最前面！.dbvs/chat 是旧数据，实时终端才是当前状态
-      const liveOutput = getRecentPtyOutput(match, 80)
-      const liveSection = liveOutput
-        ? `📡 实时终端当前输出 (最近80行):\n${'─'.repeat(50)}\n${liveOutput.slice(-3000)}\n${'─'.repeat(50)}`
-        : ''
-
-      if (messages.length === 0) {
-        const fallback = liveSection
-          ? `📋 ${name}: .dbvs/chat 暂无记录。\n\n${liveSection}`
-          : `📭 ${name}: ${hours ? `最近 ${hours} 小时内` : ''}无聊天记录，实时终端也无输出`
-        return { success: true, output: fallback }
+      // 先尝试实时数据（Chat UI 消息 + 对话框 + 终端）
+      if (liveSection) {
+        const parts: string[] = [liveSection]
+        // .dbvs/chat 作为补充（可能包含更早的历史记录）
+        if (messages.length > 0) {
+          const header = `📋 ${name} .dbvs/chat 历史 (${totalMsgs} 条):\n${'─'.repeat(50)}\n`
+          parts.push(header + messages.join('\n'))
+        }
+        return { success: true, output: parts.join('\n\n') }
       }
 
-      const header = `📋 ${name} .dbvs/chat 历史记录 (${totalMsgs} 条，可能不是当前会话):\n${'─'.repeat(50)}\n`
-      const chatSection = messages.reverse().join('\n')
-      // 实时终端 FIRST，历史聊天 SECOND — 实时终端才是当前状态！
-      return { success: true, output: liveSection + '\n' + header + chatSection }
+      // 实时数据为空 → 回退到 .dbvs/chat
+      if (messages.length > 0) {
+        const header = `📋 ${name} .dbvs/chat 历史记录 (${totalMsgs} 条):\n${'─'.repeat(50)}\n`
+        return { success: true, output: header + messages.join('\n') }
+      }
+
+      return { success: true, output: `📭 ${name}: 无聊天记录` }
     } catch (err) {
       return { success: false, output: `❌ 读取 ${name} 聊天记录失败: ${String(err)}` }
     }
@@ -790,6 +935,17 @@ const healthReportTool: AgentTool = {
       // PTY 状态
       if (isOnline) {
         sections.push(`- **PTY 状态**: 在线 (PID: ${ptyStatus.pid}, Session: ${ptyStatus.sessionId || 'N/A'})`)
+
+        // 实时终端语义状态
+        try {
+          const recentOutput = getRecentPtyOutput(id, 60)
+          if (recentOutput) {
+            const statusMatch = recentOutput.match(/📊 当前状态:\s*(.+)/)
+            if (statusMatch) {
+              sections.push(`- **实时状态**: ${statusMatch[1].trim()}`)
+            }
+          }
+        } catch { /* PTY 输出读取失败，跳过 */ }
       } else {
         sections.push(`- **PTY 状态**: 离线`)
         sections.push('')
@@ -1128,7 +1284,8 @@ echo ========================================
 pause
 `
         const batPath = path.join(id, '.dbvs-launch.bat')
-        fs.writeFileSync(batPath, batContent, 'utf-8')
+        // UTF-8 BOM: 防止 Windows CMD 用 GBK 误读中文导致乱码
+        fs.writeFileSync(batPath, '﻿' + batContent, 'utf-8')
         results.push(`✅ ${name}: 启动脚本已生成 → ${launchCmd}`)
       } catch (err) {
         results.push(`❌ ${name}: ${String(err)}`)
@@ -1585,6 +1742,144 @@ const createProjectTool: AgentTool = {
   },
 }
 
+// ============== P-INFRA CEO诊断与知识库工具 ==============
+
+const searchKnowledgeTool: AgentTool = {
+  name: 'search_knowledge',
+  description: '搜索 CEO 知识库：API 配置配方（Anthropic Claude / DeepSeek / 代理转换层）+ 错误诊断模式（配置文件错误/权限阻塞/网络错误/项目错误）。当你需要知道如何修 API 配置、或看到一段报错但不确定原因时调用。用 1-3 个关键词搜索，如 "deepseek 配置"、"401 错误"、"连接超时"。',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: '搜索关键词，例如 "deepseek api 配置"、"权限阻塞"、"401 unauthorized"' },
+    },
+    required: ['query'],
+  },
+  group: 'infra',
+  isReadOnly: true,
+  isConcurrencySafe: true,
+  async execute(params: Record<string, unknown>, _ctx: AgentContext): Promise<ToolResult> {
+    const query = (params.query as string) || ''
+    const result = searchKnowledge(query)
+    if (!result.summary) return { success: true, output: '未找到匹配的知识条目。尝试用更通用的关键词（"api", "配置", "阻塞", "网络", "权限"）。' }
+    return { success: true, output: result.summary }
+  },
+}
+
+const diagnoseProjectTool: AgentTool = {
+  name: 'diagnose_project',
+  description: '诊断指定项目的问题。自动读取 .claude/settings.json + 最近终端输出 + 错误模式匹配，返回：问题分类（配置/权限/网络/项目/未知）+ 具体诊断 + 建议恢复步骤。用于项目 AI 无法正常工作时的自动分诊——比盲目"读终端→发按键→重启"更高效。',
+  parameters: {
+    type: 'object',
+    properties: {
+      project_path: { type: 'string', description: '要诊断的项目路径' },
+    },
+    required: ['project_path'],
+  },
+  group: 'infra',
+  isReadOnly: true,
+  isConcurrencySafe: true,
+  async execute(params: Record<string, unknown>, ctx: AgentContext): Promise<ToolResult> {
+    const targetPath = params.project_path as string
+
+    // 项目路径匹配
+    let match = ctx.projectIds.find(id => id === targetPath || id.toLowerCase() === targetPath.toLowerCase())
+    if (!match) {
+      for (const [id, name] of ctx.projectNames) {
+        if (name === targetPath || name.toLowerCase() === targetPath.toLowerCase() ||
+            id.endsWith('\\' + targetPath) || id.endsWith('/' + targetPath) || id.includes(targetPath)) {
+          match = id; break
+        }
+      }
+    }
+    if (!match) return { success: false, output: `未找到项目: ${targetPath}` }
+    const name = ctx.projectNames.get(match) || match.split('\\').pop() || match
+
+    const lines: string[] = [`## 🔍 诊断: ${name}`]
+    const findings: string[] = []
+
+    // 1. 检查 PTY 连接
+    const ptyStatus = getPtyStatus(match)
+    if (!ptyStatus.connected) {
+      lines.push('状态: 🔴 离线')
+      lines.push('建议: 使用 wake_projects 唤醒终端')
+      return { success: true, output: lines.join('\n') }
+    }
+    lines.push(`状态: 🟢 在线 (PID ${ptyStatus.pid})`)
+
+    // 2. 读取 settings.json
+    try {
+      const settingsPath = path.join(match, '.claude', 'settings.json')
+      if (fs.existsSync(settingsPath)) {
+        const raw = fs.readFileSync(settingsPath, 'utf-8')
+        const settings = JSON.parse(raw)
+        lines.push('')
+        lines.push('### .claude/settings.json')
+        lines.push('```json')
+        lines.push(JSON.stringify(settings, null, 2).slice(0, 1000))
+        lines.push('```')
+
+        // 检查配置完整性
+        const env = settings.env || {}
+        if (!env.ANTHROPIC_API_KEY) {
+          findings.push('⚠️ 缺少 ANTHROPIC_API_KEY — 项目 AI 无法调用 API')
+        } else if (env.ANTHROPIC_API_KEY === '__YOUR_API_KEY__' || env.ANTHROPIC_API_KEY === 'sk-...') {
+          findings.push('⚠️ ANTHROPIC_API_KEY 是占位符 — 需要替换为真实的 API Key')
+        }
+        if (!env.ANTHROPIC_BASE_URL) {
+          findings.push('ℹ️ 未设置 ANTHROPIC_BASE_URL — 使用默认 Anthropic 端点')
+        }
+      } else {
+        findings.push('⚠️ 缺少 .claude/settings.json — 项目 AI 无法启动（无凭证）')
+      }
+    } catch (e: any) {
+      findings.push(`⚠️ settings.json 读取失败: ${e.message}`)
+    }
+
+    // 3. 检查终端错误快照
+    const snapshot = getPtyErrorSnapshot(match, 200)
+    if (snapshot) {
+      const diags = diagnoseErrors(snapshot)
+      if (diags.length > 0) {
+        lines.push('')
+        lines.push('### 终端错误诊断')
+        for (const d of diags) {
+          findings.push(`[${d.pattern.category}] ${d.pattern.diagnosis} — 匹配: "${d.match.slice(0, 80)}"`)
+        }
+        lines.push('')
+        lines.push('### 建议恢复步骤')
+        const seen = new Set<string>()
+        for (const d of diags) {
+          for (const step of d.pattern.recovery) {
+            const key = `${step.tool}:${step.description}`
+            if (seen.has(key)) continue
+            seen.add(key)
+            lines.push(`1. **${step.tool}** — ${step.description}`)
+          }
+        }
+      }
+    }
+
+    // 4. 汇总
+    if (findings.length === 0) {
+      lines.push('')
+      lines.push('### ✅ 未发现明显问题')
+      lines.push('项目 AI 终端在线，配置完整，终端输出中未匹配到已知错误模式。')
+      lines.push('如果项目 AI 仍不工作，建议:')
+      lines.push('1. read_project_chat 查看完整终端输出')
+      lines.push('2. shell_exec 验证网络连通性')
+      lines.push('3. search_knowledge 搜索特定错误关键词')
+    } else {
+      lines.push('')
+      lines.push('### 发现的问题')
+      for (const f of findings) {
+        lines.push(`- ${f}`)
+      }
+    }
+
+    return { success: true, output: lines.join('\n') }
+  },
+}
+
 // ============== 注册全部工具 ==============
 
 export function registerAllTools(): void {
@@ -1615,4 +1910,7 @@ export function registerAllTools(): void {
   registerTool(writeFileTool)
   // P-INFRA — CEO项目管理
   registerTool(createProjectTool)
+  // P-INFRA — CEO诊断与知识库
+  registerTool(searchKnowledgeTool)
+  registerTool(diagnoseProjectTool)
 }

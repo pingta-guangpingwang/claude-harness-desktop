@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useSyncExternalStore } from 'react'
 import { useChat } from '../../context/ChatContext'
 import { useI18n } from '../../i18n'
 import type { HorseFarmProject, HFConfig } from '../../types/horseFarm'
@@ -79,6 +79,23 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
   const pendingPermissionRef = useRef<{ id: string; name: string; params: Record<string, unknown>; reason: string } | null>(null)
   const logEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
+
+  // 虚拟滚动：只渲染最近 N 条，往上滚动态加载更早记录
+  const RENDER_WINDOW = 200
+  const LOAD_MORE = 50
+  const [renderStart, setRenderStart] = useState(() => Math.max(0, getLogs().length - RENDER_WINDOW))
+  const userScrolledUp = useRef(false)
+  const prevLogLen = useRef(actionLog.length)
+  const prevScrollBottom = useRef(0) // 加载更多时保持滚动位置
+
+  // 初始化 renderStart
+  useEffect(() => {
+    if (renderStart === 0 && actionLog.length > RENDER_WINDOW) {
+      setRenderStart(Math.max(0, actionLog.length - RENDER_WINDOW))
+    }
+  }, [])
 
   // 报告弹窗状态
   const [reportModal, setReportModal] = useState<{ title: string; content: string; visible: boolean }>({ title: '', content: '', visible: false })
@@ -201,6 +218,63 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
     window.electronAPI.harnessSetPermissions(permissions as any).catch(() => {})
   }, [permissions])
 
+  // ====== 虚拟滚动：加载更多后恢复滚动位置 ======
+  useLayoutEffect(() => {
+    if (prevScrollBottom.current > 0 && scrollContainerRef.current) {
+      const el = scrollContainerRef.current
+      el.scrollTop = el.scrollHeight - prevScrollBottom.current
+      prevScrollBottom.current = 0
+    }
+  })
+
+  // ====== 切回对话 Tab → 滚到底 ======
+  useEffect(() => {
+    if (activeTab !== 'chat') return
+    userScrolledUp.current = false
+    const el = scrollContainerRef.current
+    if (!el) return
+    // 延迟一帧等 DOM 渲染完
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight
+    })
+  }, [activeTab])
+
+  // ====== 新日志 → 自动滚到底（仅当用户未上滚时）======
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    if (actionLog.length > prevLogLen.current && !userScrolledUp.current) {
+      // 有新日志，自动滚底
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight
+      })
+    }
+    prevLogLen.current = actionLog.length
+  }, [actionLog.length])
+
+  // ====== IntersectionObserver：顶哨兵可见 → 加载更早记录 ======
+  useEffect(() => {
+    const sentinel = sentinelRef.current
+    const container = scrollContainerRef.current
+    if (!sentinel || !container) return
+    const io = new IntersectionObserver(entries => {
+      if (entries[0]?.isIntersecting && renderStart > 0) {
+        prevScrollBottom.current = container.scrollHeight - container.scrollTop
+        setRenderStart(prev => Math.max(0, prev - LOAD_MORE))
+      }
+    }, { root: container, threshold: 0.1 })
+    io.observe(sentinel)
+    return () => io.disconnect()
+  }, [renderStart])
+
+  // ====== 用户手动上滚检测 ======
+  const handleChatScroll = useCallback(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    userScrolledUp.current = distFromBottom > 80
+  }, [])
+
   // 监听 Agent 事件流（返回 cleanup 防止重复注册）
   useEffect(() => {
     const unsubscribe = window.electronAPI.harnessOnEvent((event: AgentEvent) => {
@@ -215,9 +289,18 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
         case 'tool_call':
           addStoreLog({ type: 'ai-tool', text: `🔧 调用工具: ${event.name}`, toolName: event.name })
           break
-        case 'tool_result':
-          addStoreLog({ type: 'ai-result', text: `✅ ${event.name}: ${event.result?.output?.slice(0, 200) || '完成'}`, toolName: event.name })
+        case 'tool_result': {
+          const fullOutput = event.result?.output || ''
+          const preview = fullOutput.slice(0, 2000)
+          const truncated = fullOutput.length > 2000
+          addStoreLog({
+            type: 'ai-result',
+            text: `✅ ${event.name}: ${preview}${truncated ? '\n... (点击查看完整内容)' : ''}`,
+            toolName: event.name,
+            fullContent: truncated ? fullOutput : undefined,
+          })
           break
+        }
         case 'tool_error':
           addStoreLog({ type: 'ai-error', text: `❌ ${event.name}: ${event.error || '执行失败'}`, toolName: event.name })
           break
@@ -248,7 +331,9 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
             content: prContent,
             timestamp: event.timestamp || new Date().toISOString(),
           }])
-          addStoreLog({ type: 'ai-result', text: `📩 ${prName} 回复:\n${prContent.slice(0, 400)}${prContent.length > 400 ? '\n... (点击查看完整内容)' : ''}`, toolName: `project:${prName}`, fullContent: prContent })
+          const prPreview = prContent.slice(0, 2000)
+          const prTruncated = prContent.length > 2000
+          addStoreLog({ type: 'ai-result', text: `📩 ${prName} 回复:\n${prPreview}${prTruncated ? '\n... (点击查看完整内容)' : ''}`, toolName: `project:${prName}`, fullContent: prTruncated ? prContent : undefined })
           break
         }
         case 'report_card': {
@@ -559,6 +644,10 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
   const connectedCount = heartbeats.filter(h => h.isConnected).length
   const processingCount = heartbeats.filter(h => h.isProcessing).length
 
+  // 虚拟滚动：仅渲染可见窗口
+  const visibleEntries = actionLog.slice(renderStart)
+  const hiddenAbove = renderStart
+
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100%',
@@ -694,7 +783,11 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
       {/* ====== Tab: 对话 ====== */}
       {activeTab === 'chat' && (
         <>
-          <div style={{ flex: 1, overflow: 'auto', padding: embedded ? '8px 10px' : '12px 14px' }}>
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleChatScroll}
+            style={{ flex: 1, overflow: 'auto', padding: embedded ? '8px 10px' : '12px 14px' }}
+          >
             {/* 操作日志 */}
             <div style={{
               padding: '10px 12px', borderRadius: 8,
@@ -702,57 +795,71 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
               minHeight: '100%',
             }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--app-text-primary)', marginBottom: 8 }}>
-                📋 {ha.operationLog}
+                📋 {ha.operationLog}{hiddenAbove > 0 ? ` (已隐藏 ${hiddenAbove} 条，上滚加载)` : ''}
               </div>
               <div style={{
                 fontFamily: 'var(--app-font-mono)',
                 fontSize: 10 * chatFontScale, lineHeight: 1.7, color: 'var(--app-text-secondary)',
               }}>
-                {actionLog.length === 0 ? (
+                {actionLog.length === 0 && (
                   <div style={{ fontSize: 11 }}>{ha.noLogsYet}</div>
-                ) : (
-                  actionLog.map((entry, i) => {
-                    const isClickable = !!entry.fullContent && !!entry.toolName?.startsWith('project:')
-                    return (
-                    <div key={i} style={{
-                      whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                      padding: '2px 4px', borderRadius: 4,
-                      background: entry.type === 'user' ? 'rgba(99,102,241,0.08)'
-                        : entry.type === 'ai-error' ? 'rgba(239,68,68,0.08)'
-                        : entry.type === 'ai-permission' ? 'rgba(245,158,11,0.08)'
-                        : entry.type === 'ai-tool' ? 'rgba(16,185,129,0.06)'
-                        : 'transparent',
-                      borderLeft: entry.type === 'user' ? '2px solid #6366f1'
-                        : entry.type === 'ai-error' ? '2px solid #ef4444'
-                        : entry.type === 'ai-permission' ? '2px solid #f59e0b'
-                        : entry.type === 'ai-tool' ? '2px solid #10b981'
-                        : '2px solid transparent',
-                      marginBottom: 2,
-                      cursor: isClickable ? 'pointer' : 'default',
-                    }}
-                      onClick={() => {
-                        if (isClickable) {
-                          const prName = entry.toolName!.replace('project:', '')
-                          setProjectDetailModal({ projectName: prName, content: entry.fullContent!, visible: true })
-                        }
+                )}
+                {actionLog.length > 0 && (
+                  <>
+                    {/* 顶哨兵 — 可见时触发加载更早记录 */}
+                    <div ref={sentinelRef} style={{ height: 1, marginBottom: 0 }} />
+                    {hiddenAbove > 0 && (
+                      <div style={{ textAlign: 'center', padding: '4px 0', color: 'var(--app-text-tertiary)', fontSize: 10 }}>
+                        ▲ 上滚加载更多 (剩余 {hiddenAbove} 条)
+                      </div>
+                    )}
+                    {visibleEntries.map((entry, i) => {
+                      const realIdx = renderStart + i
+                      const isClickable = !!entry.fullContent
+                      const entryLabel = entry.toolName?.startsWith('project:')
+                        ? entry.toolName.replace('project:', '')
+                        : (entry.toolName || '工具')
+                      const isProject = !!entry.toolName?.startsWith('project:')
+                      return (
+                      <div key={realIdx} style={{
+                        whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                        padding: '2px 4px', borderRadius: 4,
+                        background: entry.type === 'user' ? 'rgba(99,102,241,0.08)'
+                          : entry.type === 'ai-error' ? 'rgba(239,68,68,0.08)'
+                          : entry.type === 'ai-permission' ? 'rgba(245,158,11,0.08)'
+                          : entry.type === 'ai-tool' ? 'rgba(16,185,129,0.06)'
+                          : 'transparent',
+                        borderLeft: entry.type === 'user' ? '2px solid #6366f1'
+                          : entry.type === 'ai-error' ? '2px solid #ef4444'
+                          : entry.type === 'ai-permission' ? '2px solid #f59e0b'
+                          : entry.type === 'ai-tool' ? '2px solid #10b981'
+                          : '2px solid transparent',
+                        marginBottom: 2,
+                        cursor: isClickable ? 'pointer' : 'default',
                       }}
-                      title={isClickable ? '点击查看完整回复' : undefined}
-                    >
-                      <span style={{ color: 'var(--app-text-tertiary)', marginRight: 6 }}>{entry.time}</span>
-                      <span style={{
-                        color: entry.type === 'user' ? '#6366f1'
-                          : entry.type === 'ai-error' ? '#ef4444'
-                          : entry.type === 'ai-permission' ? '#f59e0b'
-                          : entry.type === 'ai-tool' ? '#10b981'
-                          : 'var(--app-text-primary)',
-                        fontWeight: entry.type === 'user' || entry.type === 'ai-tool' ? 600 : 400,
-                        textDecoration: isClickable ? 'underline' : 'none',
-                        textUnderlineOffset: 2,
-                      }}>
-                        {entry.type === 'user' ? '💬 ' : ''}{entry.text}
-                      </span>
-                    </div>
-                  )})
+                        onClick={() => {
+                          if (isClickable) {
+                            setProjectDetailModal({ projectName: isProject ? entryLabel : `工具: ${entryLabel}`, content: entry.fullContent!, visible: true })
+                          }
+                        }}
+                        title={isClickable ? '点击查看完整内容' : undefined}
+                      >
+                        <span style={{ color: 'var(--app-text-tertiary)', marginRight: 6 }}>{entry.time}</span>
+                        <span style={{
+                          color: entry.type === 'user' ? '#6366f1'
+                            : entry.type === 'ai-error' ? '#ef4444'
+                            : entry.type === 'ai-permission' ? '#f59e0b'
+                            : entry.type === 'ai-tool' ? '#10b981'
+                            : 'var(--app-text-primary)',
+                          fontWeight: entry.type === 'user' || entry.type === 'ai-tool' ? 600 : 400,
+                          textDecoration: isClickable ? 'underline' : 'none',
+                          textUnderlineOffset: 2,
+                        }}>
+                          {entry.type === 'user' ? '💬 ' : ''}{entry.text}
+                        </span>
+                      </div>
+                    )})}
+                  </>
                 )}
                 <div ref={logEndRef} />
               </div>
@@ -1162,7 +1269,7 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               padding: '16px 20px', borderBottom: '1px solid #e5e7eb',
             }}>
-              <h3 style={{ margin: 0, fontSize: 16, color: '#1f2937' }}>📩 {projectDetailModal.projectName} {ha.projectReplyTitle}</h3>
+              <h3 style={{ margin: 0, fontSize: 16, color: '#1f2937' }}>📋 {projectDetailModal.projectName} 完整内容</h3>
               <button onClick={() => setProjectDetailModal({ projectName: '', content: '', visible: false })} style={{
                 padding: '4px 10px', borderRadius: 6, border: '1px solid #d1d5db',
                 background: '#fff', cursor: 'pointer', fontSize: 18, lineHeight: 1, color: '#6b7280',

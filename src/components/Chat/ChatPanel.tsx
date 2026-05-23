@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { useChat, type ChatSession } from '../../context/ChatContext'
 import { useTheme } from '../../context/ThemeContext'
 import { ChatBubble } from './ChatBubble'
@@ -34,6 +34,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ projectPath, embedded }) =
   })
 
   const displayProject = projectPath || currentProject
+
+  // 消息窗口：默认只渲染最近 N 条，向上滚动加载更多
+  const MSG_WINDOW = 120
+  const [windowSize, setWindowSize] = useState(MSG_WINDOW)
+  // 新消息到达时自动扩展窗口到最新
+  useEffect(() => {
+    setWindowSize(prev => Math.max(prev, Math.min(messages.length, MSG_WINDOW)))
+  }, [messages.length])
+  const visibleMessages = useMemo(
+    () => messages.slice(Math.max(0, messages.length - windowSize)),
+    [messages, windowSize],
+  )
 
   // 定时刷新全流程状态
   const refreshFlowStatus = useCallback(async () => {
@@ -255,7 +267,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ projectPath, embedded }) =
             padding: embedded ? '8px 10px' : '12px 14px',
           }}
         >
-          {messages.map(msg => (
+          {messages.length > MSG_WINDOW && (
+            <div style={{
+              textAlign: 'center', padding: '8px 0',
+              fontSize: 11, color: 'var(--app-text-secondary)', cursor: 'pointer',
+              fontStyle: 'italic', userSelect: 'none',
+            }} onClick={() => setWindowSize(prev => Math.min(prev + MSG_WINDOW, messages.length))}>
+              ... 向上滚动加载更多 ({messages.length - windowSize} 条更早的消息) ...
+            </div>
+          )}
+          {visibleMessages.map(msg => (
             <ChatBubble key={msg.id} message={msg} embedded={embedded} />
           ))}
         </div>

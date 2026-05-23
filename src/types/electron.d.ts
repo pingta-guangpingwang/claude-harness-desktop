@@ -83,6 +83,7 @@ export interface ElectronAPI {
   sessionGet: (projectPath: string, sessionId: string) => Promise<{ success: boolean; session: any }>
   sessionDelete: (projectPath: string, sessionId: string) => Promise<{ success: boolean }>
   sessionSave: (session: any) => Promise<{ success: boolean }>
+  chatPushMessages: (projectPath: string, messages: any[]) => Promise<{ success: boolean }>
   // Audit (v3.0)
   auditGetProjectEvents: (projectPath: string) => Promise<{ success: boolean; events: any[]; message?: string }>
   auditGetMiddlewareStats: () => Promise<{ success: boolean; stats?: any; message?: string }>

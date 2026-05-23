@@ -228,17 +228,26 @@ export default function ProjectProgressCard({
         )}
 
         <div className="hf-card-actions">
-          <button onClick={async (e) => {
-            e.stopPropagation()
-            try {
-              const result = await window.electronAPI.openFolder(hfProject.projectPath)
-              if (!result.success) {
-                addSystemMessage(`打开文件夹失败: ${(result as any).message || '未知错误'}`, 'error')
+          <button
+            title={`打开项目文件夹\n${hfProject.projectPath}`}
+            className="hf-open-folder-btn"
+            onClick={async (e) => {
+              e.stopPropagation()
+              console.log('[OpenFolder] 点击打开按钮, path:', hfProject.projectPath)
+              const btn = e.currentTarget as HTMLButtonElement
+              btn.classList.add('hf-clicked')
+              setTimeout(() => btn.classList.remove('hf-clicked'), 200)
+              try {
+                const result = await window.electronAPI.openFolder(hfProject.projectPath)
+                console.log('[OpenFolder] 结果:', JSON.stringify(result))
+                if (!result.success) {
+                  addSystemMessage(`打开文件夹失败: ${(result as any).message || '未知错误'}`, 'error')
+                }
+              } catch (err) {
+                console.error('[OpenFolder] 异常:', err)
+                addSystemMessage(`打开文件夹异常: ${String(err)}`, 'error')
               }
-            } catch (err) {
-              addSystemMessage(`打开文件夹异常: ${String(err)}`, 'error')
-            }
-          }}>{t.horseFarm.openProject}</button>
+            }}>{t.horseFarm.openProject}</button>
           <button
             className="primary"
             onClick={(e) => { e.stopPropagation(); onLaunchChat() }}
@@ -252,7 +261,7 @@ export default function ProjectProgressCard({
                 e.stopPropagation()
                 if (launching) return
                 if (!hasLaunchBat) {
-                  setTipModal(t.horseFarm.launchBatNoScript)
+                  setTipModal('launchBatGenerate')
                   return
                 }
                 setLaunching(true)
@@ -417,7 +426,7 @@ export default function ProjectProgressCard({
         </div>
       )}
 
-      {/* 通用提示弹窗 — 居中大弹窗，手动关闭 */}
+      {/* 通用提示弹窗 — 居中大弹窗，手动关闭；launchBatGenerate 类型含操作按钮 */}
       {tipModal && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 10000,
@@ -431,20 +440,57 @@ export default function ProjectProgressCard({
             boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
             textAlign: 'center',
           }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>🚀</div>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>{tipModal === 'launchBatGenerate' ? '🚀' : '💡'}</div>
             <p style={{
               margin: '0 0 24px', fontSize: '16px', lineHeight: 1.8, color: '#374151',
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
             }}>
-              {tipModal}
+              {tipModal === 'launchBatGenerate'
+                ? '该项目尚未配置一键启动脚本。\n\n是否立即生成 .dbvs-launch.bat？\n生成后点击 🚀 即可一键启动项目。'
+                : tipModal}
             </p>
-            <button onClick={() => setTipModal(null)} style={{
-              padding: '10px 32px', borderRadius: '8px', border: 'none',
-              background: '#4f46e5', color: '#fff',
-              cursor: 'pointer', fontSize: '14px', fontWeight: 600,
-            }}>
-              我知道了
-            </button>
+            {tipModal === 'launchBatGenerate' ? (
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                <button onClick={async () => {
+                  setTipModal(null)
+                  setLaunching(true)
+                  try {
+                    const res = await window.electronAPI.generateLaunchBat(hfProject.projectPath, hfProject.projectName)
+                    if (res.success) {
+                      addSystemMessage('✅ 启动脚本已生成，点击 🚀 启动项目', 'status')
+                      checkBat()
+                    } else {
+                      addSystemMessage(`生成失败: ${(res as any).message || '未知错误'}`, 'error')
+                    }
+                  } catch (err) {
+                    addSystemMessage(`生成异常: ${String(err)}`, 'error')
+                  } finally {
+                    setLaunching(false)
+                  }
+                }} style={{
+                  padding: '10px 28px', borderRadius: '8px', border: 'none',
+                  background: '#f59e0b', color: '#fff',
+                  cursor: 'pointer', fontSize: '14px', fontWeight: 600,
+                }}>
+                  生成启动脚本
+                </button>
+                <button onClick={() => setTipModal(null)} style={{
+                  padding: '10px 28px', borderRadius: '8px', border: '1px solid #d1d5db',
+                  background: '#fff', color: '#374151',
+                  cursor: 'pointer', fontSize: '14px',
+                }}>
+                  取消
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => setTipModal(null)} style={{
+                padding: '10px 32px', borderRadius: '8px', border: 'none',
+                background: '#4f46e5', color: '#fff',
+                cursor: 'pointer', fontSize: '14px', fontWeight: 600,
+              }}>
+                我知道了
+              </button>
+            )}
           </div>
         </div>
       )}

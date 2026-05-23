@@ -45,8 +45,13 @@ export declare function killPtySession(projectPath?: string): {
     success: boolean;
     message?: string;
 };
-/** 获取最近 PTY 输出（供 harnessAgent read_project_chat 工具读取实时终端内容） */
-export declare function getRecentPtyOutput(projectPath: string, maxLines?: number): string;
+/** 获取最近 PTY 输出（供 harnessAgent read_project_chat 工具读取实时终端内容）。
+ *  主数据源：messageStores.responses（主进程直接捕获，无 IPC 依赖）+ chatMessages（Chat UI 推送）。
+ *  辅助数据源：对话框 + 可读终端输出。 */
+export declare function getRecentPtyOutput(projectPath: string, _maxLines?: number): string;
+/** 获取最近 PTY 错误快照（供 harnessAgent diagnose_project 工具使用）。
+ *  返回清洗过的状态行 + 原始最近输出（保留错误信息用于模式匹配） */
+export declare function getPtyErrorSnapshot(projectPath: string, maxLines?: number): string;
 /** 直接查询 PTY 状态（供 harnessAgent 工具调用，不走 IPC） */
 export declare function getPtyStatus(projectPath: string): {
     connected: boolean;

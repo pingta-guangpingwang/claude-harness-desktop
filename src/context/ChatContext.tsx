@@ -75,59 +75,129 @@ function emptySession(): ProjectSessionState {
   }
 }
 
-/** 清理 PTY 输出：保留颜色 CSI，去除 TUI 控制码和装饰字符 */
-function cleanPtyOutput(text: string): string {
-  let out = text
-    // 去除 OSC (title/notification)，保留 CSI
+/** Claude Code 思考阶段关键词 → 对应状态文本 */
+const THINKING_PATTERNS: [RegExp, string][] = [
+  [/scurry/i, 'Scurrying...'],
+  [/simmer/i, 'Simmering...'],
+  [/brew/i, 'Brewed...'],
+  [/crunch/i, 'Crunched...'],
+  [/wibbl/i, 'Wibbling...'],
+  [/boogie/i, 'Boogieing...'],
+  [/orchestrat/i, 'Orchestrating...'],
+  [/almost done/i, 'Almost done...'],
+  [/think/i, 'Thinking...'],
+  [/load/i, 'Loading...'],
+  [/analyz/i, 'Analyzing...'],
+  [/process/i, 'Processing...'],
+  [/search/i, 'Searching...'],
+  [/read/i, 'Reading files...'],
+  [/edit/i, 'Editing...'],
+  [/execut/i, 'Executing...'],
+  [/init/i, 'Initializing...'],
+  [/generat/i, 'Generating...'],
+  [/compil/i, 'Compiling...'],
+  [/check/i, 'Checking...'],
+]
+
+/** 从一段文本里提取 Claude Code 思考状态（返回 null 表示不是思考阶段输出） */
+function extractThinkingStatus(text: string): string | null {
+  // 先全量清洗 ANSI（CSI + OSC），再检测
+  const stripped = text
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
     .replace(/\x1b\][^\x07]*\x07/g, '')
-    // 去除光标移动/擦除 CSI (不改变颜色的)，保留 SGR (m 结尾)
-    .replace(/\x1b\[[0-9;]*[ABCDEFGHJKSTfnsu]/g, '')
-    // 去除模式设置
-    .replace(/\x1b\[\?[0-9;]*[hl]/g, '')
+    .replace(/[\r\n]/g, ' ')
+    .replace(/[▐▌▛▜▟▙▘▝▀▄█▊▎▌▏▍▋│├┤┼╺╍┄┅┈┉]/g, '')
+    .trim()
+  if (!stripped) return null
+  // 检测 spinner 字符 + 状态词
+  if (/[⏳✻✽✢✶✹✺✼✾·•]/.test(stripped)) {
+    for (const [re, label] of THINKING_PATTERNS) {
+      if (re.test(stripped)) return label
+    }
+    return 'Working...'
+  }
+  // 纯 spinner / 进度条类内容
+  if (/^[⏳✻✽✢✶✹✺✼✾·•\s▐▌▛▜▟▙▘▝▀▄█▊▎▌▏▍▋│├┤┼╺╍┄┅┈┉]+$/.test(stripped)) return 'Working...'
+  // 检测含 orchestrate/almost done 等非 spinner 状态文本
+  for (const [re, label] of THINKING_PATTERNS) {
+    if (re.test(stripped)) return label
+  }
+  return null
+}
+
+/** 清理 PTY 输出：保留颜色 CSI，去除 TUI 控制码和装饰字符。
+ *  返回 { clean, status } — 如果有意义的内容返回 clean，否则返回 thinking status。 */
+function cleanPtyOutput(text: string): { clean: string; status: string | null } {
+  let out = text
+    // 去除 OSC (title/notification)
+    .replace(/\x1b\][^\x07]*\x07/g, '')
+    // 全量去除 CSI 序列（包含光标移动/擦除/颜色SGR/模式设置）
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
     .replace(/\x1b[>=]/g, '')
-    // CR 行为：\r\n → \n，单独的 \r 后无 \n 表示覆盖当前行，丢弃\r前当前行内容
+    // CR 行为：\r\n → \n，单独的 \r 覆盖当前行
     .replace(/\r\n/g, '\n')
     .replace(/[^\n]*\r(?!\n)/g, '')
-    // 替换 TUI 框线字符为纯文本
+    // 替换 TUI 框线字符
     .replace(/[╭╰╮╯]/g, '+')
     .replace(/[─━]/g, '-')
     .replace(/[│┃]/g, '|')
-    .replace(/[▐▌▛▜▟▙▘▝▀▄█]/g, '')
-    .replace(/[●◉◎○◯◌◍◐◑◒◓]/g, '*')
+    .replace(/[▐▌▛▜▟▙▘▝▀▄█▊▎▌▏▍▋│├┤┼╺╍┄┅┈┉]/g, '')
+    // 丢弃 OSC 设置终端标题等
+    .replace(/\x1b\][^\x1b]*/g, '')
 
-  // 逐行过滤 Claude Code TUI 噪音
+  // 逐行过滤噪音
   const lines = out.split('\n')
-  const filtered = lines.filter(line => {
+  const filtered: string[] = []
+  for (const line of lines) {
     const trimmed = line.replace(/\x1b\[[0-9;]*m/g, '').trim()
-    if (!trimmed) return false  // 空行丢弃（后面统一加回）
-    // Claude Code 状态行
-    if (/^[·•✻✽✢✶⏳]\s*(Scurrying|Simmering|Brewed|Crunched|thinking|Loading)/i.test(trimmed)) return false
+    if (!trimmed) continue
+    // Claude Code spinner 状态行 + orchestrating 状态
+    if (/^[⏳✻✽✢✶✹✺✼✾·•]\s*(Scurrying|Simmering|Brewed|Crunched|Wibbling|Boogieing|Orchestrat|thinking|Loading|almost done)/i.test(trimmed)) continue
     // 纯装饰分隔线
-    if (/^[-━─=–—]{8,}$/.test(trimmed)) return false
-    // 快捷提示行
-    if (/^\?\s*for\s*shortcuts/i.test(trimmed)) return false
-    if (/^esc\s*to\s*interrupt/i.test(trimmed)) return false
-    if (/^\*\s*high\s*·/i.test(trimmed)) return false
-    if (/\d+\s*skill\s*descriptions?\s*dropped/i.test(trimmed)) return false
-    if (/\/doctor\s*for\s*details/i.test(trimmed)) return false
-    // Claude Code 启动横幅行（Welcome back, Tips, What's new 等）
-    if (/^(Welcome back|Tips for getting|Run \/init|What.s new|Internal fixes|API Usage Billing)/i.test(trimmed)) return false
-    // 快捷键提示
-    if (/^\d+\s*tokens?\s*·\s*thinking/i.test(trimmed)) return false
+    if (/^[-━─=–—]{6,}$/.test(trimmed)) continue
+    // 快捷提示/横幅行
+    if (/^\?\s*for\s*shortcuts/i.test(trimmed)) continue
+    if (/^esc\s*to\s*interrupt/i.test(trimmed)) continue
+    if (/^\*\s*high\s*·/i.test(trimmed)) continue
+    if (/\d+\s*skill\s*descriptions?\s*dropped/i.test(trimmed)) continue
+    if (/\/doctor\s*for\s*details/i.test(trimmed)) continue
+    if (/^(Welcome back|Tips for getting|Run \/init|What.s new|Internal fixes|API Usage Billing)/i.test(trimmed)) continue
+    if (/^\d+\s*tokens?\s*·\s*thinking/i.test(trimmed)) continue
+    // TUI footer 行（快捷键提示、接受编辑、向上编辑队列）
+    if (/Tab to (amend|complete)/i.test(trimmed)) continue
+    if (/ctrl\+e to explain/i.test(trimmed)) continue
+    if (/shift\+tab to cycle/i.test(trimmed)) continue
+    if (/Press up to edit/i.test(trimmed)) continue
+    if (/accept edits on/i.test(trimmed)) continue
+    // Tip / ⎿ 提示行
+    if (/⎿\s*Tip:/i.test(trimmed)) continue
+    if (/^\s*⎿/i.test(trimmed)) continue
+    // orchestrating 进度行（含 tokens / thought for 等统计）
+    if (/[✻✽✢✶]\s*Orchestrat/i.test(trimmed)) continue
+    // Searched for / Reading file 状态行
+    if (/^(Searched for|Reading)\s*\d/i.test(trimmed)) continue
     // 纯 spinner 字符残留
-    if (/^[✻✽✢✶\s]+$/.test(trimmed)) return false
-    return true
-  })
-
-  // 重建输出：去重连续相同行（TUI 重绘常见现象）
-  const deduped: string[] = []
-  for (const line of filtered) {
-    if (line !== deduped[deduped.length - 1]) {
-      deduped.push(line)
-    }
+    if (/^[⏳✻✽✢✶✹✺✼✾·•\s]+$/.test(trimmed)) continue
+    // 单字符/短数字残留（ANSI 碎片）
+    if (/^[a-zA-Z0-9]{1,2}$/.test(trimmed)) continue
+    filtered.push(line)
   }
 
-  return deduped.join('\n').replace(/\n{4,}/g, '\n\n').trim()
+  // 去重连续相同行
+  const deduped: string[] = []
+  for (const line of filtered) {
+    if (line !== deduped[deduped.length - 1]) deduped.push(line)
+  }
+
+  const clean = deduped.join('\n').replace(/\n{4,}/g, '\n\n').trim()
+
+  // 如果 clean 为空或是纯思考阶段输出，提取状态
+  if (!clean) {
+    const status = extractThinkingStatus(text)
+    return { clean: '', status }
+  }
+
+  return { clean, status: null }
 }
 
 export function ChatProvider({ children }: { children: ReactNode }) {
@@ -165,98 +235,120 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   })
 
-  // 自动保存当前项目会话
+  // 实时推送所有项目消息到主进程内存（仅 in-memory Map，不写磁盘，零延迟）。
+  // 供 getRecentPtyOutput 实时读取，确保 Agent 看到的与 Chat UI 完全一致。
   useEffect(() => {
-    const key = currentProject
-    if (!key) return
-    const session = getSession(key).sessionRef
-    if (!session) return
-    session.messages = getSession(key).messages
-    window.electronAPI.sessionSave({ ...session, messages: session.messages }).catch(() => {})
-  }, [version, currentProject])
+    sessionsRef.current.forEach((s, key) => {
+      if (s.messages.length === 0) return
+      window.electronAPI.chatPushMessages(key, s.messages).catch(() => {})
+    })
+  }, [version])
+
+  // 自动保存所有项目会话到磁盘（仅问答内容，过滤思考状态气泡）。
+  // debounce 2s 避免高频 PTY 数据写入风暴。
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      sessionsRef.current.forEach((s, key) => {
+        if (!s.sessionRef) return
+        s.sessionRef.messages = s.messages.filter(m => {
+          if (m.role === 'user') return true
+          if (m.role === 'assistant' && m.isResponse) return true
+          if (m.role === 'system' && !m.content.startsWith('🧠')) return true
+          return false
+        })
+        window.electronAPI.sessionSave({ ...s.sessionRef, messages: s.sessionRef.messages }).catch(() => {})
+      })
+    }, 2000)
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
+  }, [version])
 
   // 监听 PTY 数据（全局监听，按 projectPath 分发）
-  // 不过滤内容 — 全部进入聊天区，长消息由 ChatBubble 折叠
+  // 思考阶段 → 只更新单条状态气泡；● 回复 → 追加实际回复消息
   useEffect(() => {
     console.log('[Chat] ptyOnData listener registered (multi-project)')
     const unsubData = window.electronAPI.ptyOnData((projectPath: string, data: string) => {
       const key = normPath(projectPath)
-      const clean = cleanPtyOutput(data)
-      console.log('[Chat] PTY rx:', data.length, 'bytes, proj:', key.slice(-30), '→', clean.slice(0, 60))
+      const { clean, status } = cleanPtyOutput(data)
+      console.log('[Chat] PTY rx:', data.length, 'bytes, proj:', key.slice(-30),
+        status ? `→ [${status}]` : `→ ${clean.slice(0, 60)}`)
 
       updateSession(key, prev => {
-        const logEntry = `[${new Date().toLocaleTimeString('zh-CN')}] raw:${data.length}B → ${clean.slice(0, 400)}`
+        const logEntry = `[${new Date().toLocaleTimeString('zh-CN')}] raw:${data.length}B → ${status ? `[${status}]` : clean.slice(0, 400)}`
         const newLogs = [...prev.rawLogs.slice(-99), logEntry]
 
-        // 数据在流动 → 项目 PTY 已连接（修正可能 out-of-sync 的状态）
         const wasDisconnected = !prev.isConnected && !prev.isConnecting
 
-        if (!clean.trim()) {
+        // 思考阶段：只更新最后一条 thinking 状态气泡（不累积 TUI 噪音）
+        if (status) {
+          const msgs = [...prev.messages]
+          const last = msgs[msgs.length - 1]
+          if (last && last.role === 'system' && last.content.startsWith('🧠')) {
+            // 更新已有的 thinking 状态
+            msgs[msgs.length - 1] = { ...last, content: `🧠 ${status}`, timestamp: new Date().toISOString() }
+          } else {
+            msgs.push({ id: createId(), role: 'system', content: `🧠 ${status}`, timestamp: new Date().toISOString() })
+          }
+          return { ...prev, rawLogs: newLogs, messages: msgs, lastDataAt: Date.now(), isConnected: prev.isConnected || wasDisconnected, isConnecting: false }
+        }
+
+        if (!clean) {
           return { ...prev, rawLogs: newLogs, lastDataAt: Date.now(), isConnected: prev.isConnected || wasDisconnected, isConnecting: false }
         }
 
-        // 检测 ● (U+25CF) — Claude Code 实际回复的起始标记
-        // 排除 spinner 动画的孤立 ●（后跟内容不足 4 字符的视为 TUI 噪音）
+        // 检测 ● — Claude Code 实际回复起始标记
         const markerIdx = clean.indexOf('●')
         const isRealResponse = markerIdx !== -1 && clean.slice(markerIdx).trim().length > 3
 
         if (isRealResponse) {
-          // 分割：● 之前是 TUI 过程噪音，● 之后是实际回复
-          const before = clean.slice(0, markerIdx)
+          const before = clean.slice(0, markerIdx).trim()
           const response = clean.slice(markerIdx)
 
           let msgs = [...prev.messages]
-          const last = msgs[msgs.length - 1]
+          // 移除 thinking 状态气泡（已被实际内容取代）
+          const lastMsg = msgs[msgs.length - 1]
+          if (lastMsg && lastMsg.role === 'system' && lastMsg.content.startsWith('🧠')) {
+            msgs.pop()
+          }
 
-          if (before.trim()) {
+          // ● 之前的过渡内容追加到上一个非响应气泡
+          if (before) {
+            const last = msgs[msgs.length - 1]
             if (last && last.role === 'assistant' && !last.isResponse) {
               msgs = [...msgs.slice(0, -1), { ...last, content: last.content + before }]
-            } else {
-              msgs = [...msgs, {
-                id: createId(), role: 'assistant' as const, content: before,
-                timestamp: new Date().toISOString(),
-              }]
             }
           }
 
-          msgs = [...msgs, {
-            id: createId(), role: 'assistant' as const, content: response,
-            timestamp: new Date().toISOString(), isResponse: true,
-          }]
-
+          // 实际回复
+          msgs.push({ id: createId(), role: 'assistant' as const, content: response, timestamp: new Date().toISOString(), isResponse: true })
           return { ...prev, rawLogs: newLogs, messages: msgs, lastDataAt: Date.now(), isConnected: true, isConnecting: false }
         }
 
-        // 没有 marker — 追加到最后一个 assistant bubble
+        // 无 marker — 判断是否为有效内容（非纯噪音碎片）
+        // 太短的片段（< 15 chars 且无 CJK）视为 ANSI 残留，忽略
+        const hasCJK = /[\u4e00-\u9fff]/.test(clean)
+        if (!hasCJK && clean.length < 15) {
+          return { ...prev, rawLogs: newLogs, lastDataAt: Date.now(), isConnected: true, isConnecting: false }
+        }
+        // 追加到最后一条 assistant 气泡（非响应内容），但限制最大长度
         const last = prev.messages[prev.messages.length - 1]
-        if (last && last.role === 'assistant') {
-          return {
-            ...prev,
-            rawLogs: newLogs,
-            lastDataAt: Date.now(),
-            isConnected: true, isConnecting: false,
-            messages: [...prev.messages.slice(0, -1), { ...last, content: last.content + clean }],
-          }
+        if (last && last.role === 'assistant' && !last.isResponse) {
+          const merged = last.content + clean
+          // 非响应气泡超过 2000 字符就截断（保留尾部，丢弃头部噪音）
+          const capped = merged.length > 2000 ? '…' + merged.slice(-1500) : merged
+          return { ...prev, rawLogs: newLogs, lastDataAt: Date.now(), isConnected: true, isConnecting: false,
+            messages: [...prev.messages.slice(0, -1), { ...last, content: capped }] }
         }
-        return {
-          ...prev,
-          rawLogs: newLogs,
-          lastDataAt: Date.now(),
-          isConnected: true, isConnecting: false,
-          messages: [...prev.messages, {
-            id: createId(),
-            role: 'assistant' as const,
-            content: clean,
-            timestamp: new Date().toISOString(),
-          }],
-        }
+        return { ...prev, rawLogs: newLogs, lastDataAt: Date.now(), isConnected: true, isConnecting: false,
+          messages: [...prev.messages, { id: createId(), role: 'assistant' as const, content: clean, timestamp: new Date().toISOString() }] }
       })
     })
 
     const unsubSpawned = window.electronAPI.ptyOnSpawned((projectPath: string, sessionId: string, pid: number) => {
       const key = normPath(projectPath)
       console.log('[Chat] PTY spawned (external), proj:', key.slice(-30), 'pid:', pid)
-      // 如果 ChatContext 还没有该项目的会话，自动创建
+      // 如果 ChatContext 还没有该项目的会话，自动创建（含 sessionRef，确保后续保存能工作）
       updateSession(key, prev => {
         if (prev.isConnected || prev.isConnecting) return prev // 已有会话，不覆盖
         const initialMsg = {
@@ -265,12 +357,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           content: `Claude Code 终端已启动 (PID ${pid})`,
           timestamp: new Date().toISOString(),
         }
+        const newSessionRef = {
+          sessionId: sessionId || createId(),
+          projectPath: key,
+          messages: [initialMsg],
+          startedAt: new Date().toISOString(),
+        }
         return {
           ...prev,
           messages: [initialMsg],
           isConnected: false,
           isConnecting: true,
           lastDataAt: Date.now(),
+          sessionId: newSessionRef.sessionId,
+          sessionRef: newSessionRef,
         }
       })
       // 延迟设为已连接（给 Claude Code 启动时间）
@@ -290,7 +390,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       updateSession(key, prev => {
         if (prev.sessionRef) {
           prev.sessionRef.endedAt = new Date().toISOString()
-          prev.sessionRef.messages = [...prev.messages]
+          // 退出时也只保留问答内容，过滤思考气泡
+          prev.sessionRef.messages = prev.messages.filter(m => {
+            if (m.role === 'user') return true
+            if (m.role === 'assistant' && m.isResponse) return true
+            if (m.role === 'system' && !m.content.startsWith('🧠')) return true
+            return false
+          })
           window.electronAPI.sessionSave({ ...prev.sessionRef }).catch(() => {})
         }
         // isConnecting=true 说明是新 spawn 杀掉了旧会话，不追加结束提示

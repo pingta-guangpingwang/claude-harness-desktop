@@ -224,9 +224,8 @@
 
 /* Project List */
 .hf-project-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 12px;
+  /* VirtualList manages its own layout with absolute positioning;
+     do NOT set display:grid here — it conflicts with the spacer+absolute model. */
 }
 
 /* Project Progress Card */
@@ -321,6 +320,17 @@
   background: #4f46e5;
   color: #fff;
   border-color: #4f46e5;
+}
+
+/* 打开按钮 — 点击缩放反馈 */
+.hf-open-folder-btn {
+  transition: transform 0.1s ease !important;
+}
+.hf-open-folder-btn:active,
+.hf-open-folder-btn.hf-clicked {
+  transform: scale(0.85) !important;
+  background: #eef2ff !important;
+  border-color: #6366f1 !important;
 }
 
 .hf-task-summary {

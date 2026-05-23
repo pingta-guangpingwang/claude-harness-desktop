@@ -1,0 +1,6 @@
+# DBHT Ignore Patterns
+dist/
+build/
+*.log
+.env
+.tmp/

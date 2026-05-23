@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { db } from './database.js'
 import { getTokenStore } from './tokenStore.js'
+import { chatMessages } from './sessionManager.js'
 
 // node-pty v1.1 无 TypeScript 类型声明
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -43,16 +44,319 @@ const ptyReady = new Map<string, boolean>()
 const autoReplyTimes = new Map<string, number>()
 /** 实时 PTY 输出环形缓冲区：供 read_project_chat 读取当前终端的真实内容 */
 const recentOutput = new Map<string, string[]>()
-const MAX_RECENT_LINES = 200
+/** 原始 PTY 输出缓冲区：仅 ANSI 清洗 + 按行分割，不做 \\r 智能处理。
+ *  供 getRecentPtyOutput 使用，确保对话框/选项等可见文本绝不丢失。 */
+const rawRecentOutput = new Map<string, string[]>()
+/** 可读缓冲区：仅 ANSI 剥离 + 按 \\n 分段，不进行任何文本过滤。
+ *  这是供 Agent 查看的"跟 Chat UI 看到的差不多"的原始输出。
+ *  与 cleanPtyChunk 不同：不丢分隔线、不丢 TUI 提示、不丢 spinner 文本。 */
+const readableBuffer = new Map<string, string[]>()
+const MAX_RECENT_LINES = 2000
+
+/** Claude Code 思考阶段关键词 → 对应状态文本（移植自 ChatContext.tsx） */
+const THINKING_PATTERNS: [RegExp, string][] = [
+  [/scurry/i, 'Scurrying...'],
+  [/simmer/i, 'Simmering...'],
+  [/brew/i, 'Brewed...'],
+  [/crunch/i, 'Crunched...'],
+  [/wibbl/i, 'Wibbling...'],
+  [/boogie/i, 'Boogieing...'],
+  [/orchestrat/i, 'Orchestrating...'],
+  [/almost done/i, 'Almost done...'],
+  [/think/i, 'Thinking...'],
+  [/load/i, 'Loading...'],
+  [/analyz/i, 'Analyzing...'],
+  [/process/i, 'Processing...'],
+  [/search/i, 'Searching...'],
+  [/read/i, 'Reading files...'],
+  [/edit/i, 'Editing...'],
+  [/execut/i, 'Executing...'],
+  [/init/i, 'Initializing...'],
+  [/generat/i, 'Generating...'],
+  [/compil/i, 'Compiling...'],
+  [/check/i, 'Checking...'],
+  [/julienn/i, 'Julienning...'],
+  [/ferment/i, 'Fermenting...'],
+  [/bootstrap/i, 'Bootstrapping...'],
+  [/warp/i, 'Warping...'],
+  [/stir/i, 'Stirring...'],
+  [/noodl/i, 'Noodling...'],
+  [/mull/i, 'Mulling...'],
+  [/ponder/i, 'Pondering...'],
+  [/mus/i, 'Musing...'],
+  [/dwell/i, 'Dwelling...'],
+  [/stew/i, 'Stewing...'],
+  [/brood/i, 'Brooding...'],
+  [/ruminat/i, 'Ruminating...'],
+  [/perk/i, 'Perking...'],
+  [/laz/i, 'Lazing...'],
+  [/infus/i, 'Infusing...'],
+  [/sip/i, 'Sipping...'],
+  [/craft/i, 'Crafting...'],
+  [/decipher/i, 'Deciphering...'],
+  [/spelunk/i, 'Spelunking...'],
+  [/architect/i, 'Architecting...'],
+  [/actualiz/i, 'Actualizing...'],
+  [/dilly-dally/i, 'Dilly-dallying...'],
+  [/sauté/i, 'Sautéed...'],
+  [/temper/i, 'Tempering...'],
+  [/putter/i, 'Puttering...'],
+  [/churn/i, 'Churned...'],
+]
+
+/** 聚合后的项目消息存储：模拟渲染进程 updateSession 的 ● 聚合逻辑 */
+interface ProjectMessages {
+  thinkingStatus: string | null
+  chatter: string
+  responses: string[]
+  dialogs: string[]
+  lastDataAt: number
+}
+
+const messageStores = new Map<string, ProjectMessages>()
+const MAX_RESPONSES = 50
+const MAX_CHATTER = 2000
+const MAX_DIALOGS = 20
+
+function emptyMessages(): ProjectMessages {
+  return { thinkingStatus: null, chatter: '', responses: [], dialogs: [], lastDataAt: 0 }
+}
+
+/** 从一段文本里提取 Claude Code 思考状态（移植自 ChatContext.tsx）。
+ *  关键增强：即使没有 spinner 前缀，也能识别 "almost done" 等状态残片。 */
+function extractThinkingStatus(text: string): string | null {
+  const stripped = text
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+    .replace(/\x1b\][^\x07]*\x07/g, '')
+    .replace(/[\r\n]/g, ' ')
+    .replace(/[▐▌▛▜▟▙▘▝▀▄█▊▎▌▏▍▋│├┤┼╺╍┄┅┈┉]/g, '')
+    .trim()
+  if (!stripped) return null
+  // 检测 spinner 字符 + 状态词
+  if (/[⏳✻✽✢✶✹✺✼✾·•]/.test(stripped)) {
+    for (const [re, label] of THINKING_PATTERNS) {
+      if (re.test(stripped)) return label
+    }
+    return 'Working...'
+  }
+  // 纯 spinner / 进度条类内容
+  if (/^[⏳✻✽✢✶✹✺✼✾·•\s▐▌▛▜▟▙▘▝▀▄█▊▎▌▏▍▋│├┤┼╺╍┄┅┈┉]+$/.test(stripped)) return 'Working...'
+  // 检测含 orchestrate/almost done 等非 spinner 状态文本（关键：捕获残片）
+  for (const [re, label] of THINKING_PATTERNS) {
+    if (re.test(stripped)) return label
+  }
+  return null
+}
+
+/** 清洗 PTY 数据块：剥离 ANSI + 过滤 TUI 噪声。
+ *  移植自 ChatContext.tsx 的 cleanPtyOutput（渲染进程验证过的逻辑）。
+ *  返回清洗后的行数组（可能为空）。 */
+function cleanPtyChunk(text: string): string[] {
+  let out = text
+    // OSC 序列
+    .replace(/\x1b\][^\x07]*\x07/g, '')
+    // 全量 CSI 序列
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+    .replace(/\x1b[>=]/g, '')
+    // CR 行为
+    .replace(/\r\n/g, '\n')
+    .replace(/[^\n]*\r(?!\n)/g, '')
+    // TUI 框线 → ASCII
+    .replace(/[╭╰╮╯]/g, '+')
+    .replace(/[─━]/g, '-')
+    .replace(/[│┃]/g, '|')
+    .replace(/[▐▌▛▜▟▙▘▝▀▄█▊▎▌▏▍▋│├┤┼╺╍┄┅┈┉]/g, '')
+    // 残余 OSC
+    .replace(/\x1b\][^\x1b]*/g, '')
+
+  // 逐行过滤
+  const filtered: string[] = []
+  for (const line of out.split('\n')) {
+    const t = line.replace(/\x1b\[[0-9;]*m/g, '').trim()
+    if (!t) continue
+    // spinner + 状态动词
+    if (/^[⏳✻✽✢✶✹✺✼✾·•*]\s*(Scurrying|Simmering|Brewed|Crunched|Wibbling|Boogieing|Orchestrat|Dilly-dallying|Sautéed|Tempering|Puttering|Churned|thinking|Loading|Working|Doing|Crafting|Deciphering|Spelunking|Architecting|Actualizing|almost done)/i.test(t)) continue
+    // 分隔线
+    if (/^[-━─=–—]{6,}$/.test(t)) continue
+    // 快捷提示/横幅
+    if (/^\?\s*for\s*shortcuts/i.test(t)) continue
+    if (/^esc\s*to\s*interrupt/i.test(t)) continue
+    if (/^\*\s*high\s*·/i.test(t)) continue
+    if (/\d+\s*skill\s*descriptions?\s*dropped/i.test(t)) continue
+    if (/\/doctor\s*for\s*details/i.test(t)) continue
+    if (/^(Welcome back|Tips for getting|Run \/init|What.s new|Internal fixes|API Usage Billing)/i.test(t)) continue
+    if (/^\d+\s*tokens?\s*·\s*thinking/i.test(t)) continue
+    // TUI footer
+    if (/Tab to (amend|complete)/i.test(t)) continue
+    if (/ctrl\+[eg] to (explain|edit)/i.test(t)) continue
+    if (/shift\+tab to cycle/i.test(t)) continue
+    if (/Press up to edit/i.test(t)) continue
+    if (/accept\s*edits?\s*(on|off)/i.test(t)) continue
+    // Tip / ⎿
+    if (/⎿\s*Tip:/i.test(t)) continue
+    if (/^\s*⎿/i.test(t)) continue
+    // orchestrating 进度
+    if (/[✻✽✢✶*]\s*Orchestrat/i.test(t)) continue
+    // Searched/Reading 状态
+    if (/^(Searched for|Reading)\s*\d/i.test(t)) continue
+    // 纯 spinner
+    if (/^[⏳✻✽✢✶✹✺✼✾·•*\s]+$/.test(t)) continue
+    // 1-2 字符残片
+    if (/^[a-zA-Z0-9]{1,2}$/.test(t)) continue
+    // Resume / 会话结束
+    if (/^Resume this session with:/i.test(t)) continue
+    if (/Claude Code 会话已结束/i.test(t)) continue
+    // high·/effort
+    if (/^●\s*high\s*·\s*\/effort/i.test(t)) continue
+    // 纯 TUI 框线
+    if (/^[+|\-]{3,}\s*$/i.test(t) && t.length < 60) continue
+    filtered.push(line)
+  }
+
+  // 去重连续相同行
+  const deduped: string[] = []
+  for (const line of filtered) {
+    if (line !== deduped[deduped.length - 1]) deduped.push(line)
+  }
+  return deduped
+}
+
+/** 仅剥离 ANSI 转义序列 + OSC，不做任何文本过滤。供 readableBuffer 使用。 */
+function stripAnsiOnly(text: string): string[] {
+  return text
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+    .replace(/\x1b\][^\x07]*\x07/g, '')
+    .replace(/\x1b[>=]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0)
+}
+
+function appendRawOutput(key: string, data: string): void {
+  // 1. 保持 rawRecentOutput 缓冲区（供 getPtyErrorSnapshot 原始诊断用）
+  let rawLines = rawRecentOutput.get(key)
+  if (!rawLines) { rawLines = []; rawRecentOutput.set(key, rawLines) }
+  const cleaned = cleanPtyChunk(data)
+  for (const l of cleaned) {
+    if (rawLines.length >= MAX_RECENT_LINES) rawLines.shift()
+    rawLines.push(l)
+  }
+
+  // 1b. 保持 readableBuffer（仅 ANSI 剥离，不做文本过滤 — 给 Agent 看的）
+  let readable = readableBuffer.get(key)
+  if (!readable) { readable = []; readableBuffer.set(key, readable) }
+  for (const l of stripAnsiOnly(data)) {
+    if (readable.length >= MAX_RECENT_LINES) readable.shift()
+    readable.push(l)
+  }
+
+  // 2. 聚合消息（模拟渲染进程 updateSession 的 ● 聚合逻辑）
+  let msgs = messageStores.get(key)
+  if (!msgs) { msgs = emptyMessages(); messageStores.set(key, msgs) }
+  msgs.lastDataAt = Date.now()
+
+  for (const line of cleaned) {
+    const t = line.replace(/\x1b\[[0-9;]*m/g, '').trim()
+    if (!t) continue
+
+    // 2a. 对话框/选项菜单检测（最高优先 — 绝不抑制）
+    if (/Do ?you ?want ?to ?proceed/i.test(t) || /Doyouwanttoproceed/i.test(t) ||
+        /Use this API/i.test(t) || /Quick safety check/i.test(t) ||
+        /trust this folder/i.test(t) || /Auto-update failed/i.test(t) ||
+        /This command requires approval/i.test(t) ||
+        /A new version.*is available/i.test(t) || /update available/i.test(t)) {
+      msgs.dialogs.push(t)
+      if (msgs.dialogs.length > MAX_DIALOGS) msgs.dialogs.shift()
+      continue
+    }
+    if (/^❯\s+\d+\./.test(t)) {
+      msgs.dialogs.push(t)
+      if (msgs.dialogs.length > MAX_DIALOGS) msgs.dialogs.shift()
+      continue
+    }
+    if (/^\s+\d+\.\s/.test(t) && /Yes|No|Proceed|Continue|Trust|Skip|Update|Later/i.test(t)) {
+      msgs.dialogs.push(t)
+      if (msgs.dialogs.length > MAX_DIALOGS) msgs.dialogs.shift()
+      continue
+    }
+
+    // 2b. 思考状态检测（提取状态文本 → 更新单条气泡，不累积）
+    const thinkStatus = extractThinkingStatus(t)
+    if (thinkStatus) {
+      msgs.thinkingStatus = thinkStatus
+      continue
+    }
+
+    // 2c. ● 标记检测 → 真正的 AI 回复
+    const markerIdx = t.indexOf('●')
+    if (markerIdx !== -1 && t.slice(markerIdx).trim().length > 3) {
+      const before = t.slice(0, markerIdx).trim()
+      const response = t.slice(markerIdx)
+      // ● 之前的过渡内容合并到 chatter
+      if (before) {
+        msgs.chatter += (msgs.chatter ? '\n' : '') + before
+        if (msgs.chatter.length > MAX_CHATTER) msgs.chatter = '…' + msgs.chatter.slice(-1500)
+      }
+      msgs.responses.push(response)
+      if (msgs.responses.length > MAX_RESPONSES) msgs.responses.shift()
+      msgs.thinkingStatus = null
+      continue
+    }
+
+    // 2d. 无特殊标记 → 累积到 chatter（单个桶，持续替换而非堆积）
+    msgs.chatter += (msgs.chatter ? '\n' : '') + t
+    if (msgs.chatter.length > MAX_CHATTER) msgs.chatter = '…' + msgs.chatter.slice(-1500)
+  }
+}
 function appendRecentOutput(key: string, data: string): void {
   let lines = recentOutput.get(key)
   if (!lines) { lines = []; recentOutput.set(key, lines) }
-  // 去除 ANSI 后追加
-  const clean = data.replace(/\x1b\[[0-9;]*m/g, '').replace(/\r/g, '')
-  const newLines = clean.split('\n')
-  for (const l of newLines) {
+
+  // 1. 清洗 ANSI 转义序列
+  const clean = data
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
+    .replace(/\x1b\][^\x07]*\x07/g, "")
+
+  // 2. 按 \n 分段，段内用 \r 模拟终端同位置覆盖（TUI 动画帧折叠为最终状态）
+  const segments = clean.split("\n")
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i]
+    // 段内的 \r 分隔表示"回到行首覆盖"，取最后一次覆盖后的内容
+    const parts = segment.split("\r")
+    // 从后往前找第一个非空内容（TUI 动画的最后一帧）
+    let meaningful = ""
+    for (let j = parts.length - 1; j >= 0; j--) {
+      if (parts[j].trim()) {
+        meaningful = parts[j]
+        break
+      }
+    }
+    if (!meaningful.trim()) continue
+
+    // 3. ● 标记检测：遇到新的 AI 回复标记时，清除当前思考动画行
+    //    Claude Code 用 ● 开头标记真实 AI 消息（区别于 TUI 状态栏）
+    if (/^●\s*[A-Z一-鿿]/.test(meaningful.trim())) {
+      // 回溯删除最近的 TUI 动画帧（spinner 行），为 ● 回复腾出空间
+      let removed = 0
+      while (lines.length > 0 && removed < 20) {
+        const last = lines[lines.length - 1]
+        if (/^[✻✽✢✶✹✺✼✾·⏳🧠\s]+/.test(last) ||
+            /[✻✽✢✶]/.test(last) && last.trim().length < 60 ||
+            /almost done thinking/i.test(last) ||
+            /thought for \d+s\)/i.test(last) ||
+            /·\s*(Thinking|Working|Doing)/i.test(last)) {
+          lines.pop()
+          removed++
+        } else {
+          break
+        }
+      }
+    }
+
     if (lines.length >= MAX_RECENT_LINES) lines.shift()
-    lines.push(l)
+    lines.push(meaningful)
   }
 }
 let mainWindow: BrowserWindow | null = null
@@ -210,10 +514,96 @@ export function getSessions(): Map<string, PtySession> {
   return sessions
 }
 
+/** PTY spawn 信号量：Windows ConPTY 并发创建控制台会导致 AttachConsole failed。
+ *  限制同时最多 2 个 spawn，且每次 spawn 后至少间隔 1.5s 冷却。*/
+const MAX_CONCURRENT_SPAWNS = 2
+const SPAWN_COOLDOWN_MS = 1500
+let activeSpawns = 0
+let lastSpawnDoneAt = 0
+const spawnWaiters: Array<() => void> = []
+
+function releaseSpawnSlot(): void {
+  activeSpawns--
+  lastSpawnDoneAt = Date.now()
+  // 唤醒等待队列
+  if (spawnWaiters.length > 0 && activeSpawns < MAX_CONCURRENT_SPAWNS) {
+    const next = spawnWaiters.shift()!
+    next()
+  }
+}
+
+async function acquireSpawnSlot(): Promise<void> {
+  // 冷却检查：距离上次 spawn 完成不足 SPAWN_COOLDOWN_MS → 等待
+  const cooldownRemain = SPAWN_COOLDOWN_MS - (Date.now() - lastSpawnDoneAt)
+  if (cooldownRemain > 0 && lastSpawnDoneAt > 0) {
+    await new Promise<void>(r => setTimeout(r, cooldownRemain))
+  }
+  // 并发检查：已满 → 排队
+  if (activeSpawns >= MAX_CONCURRENT_SPAWNS) {
+    await new Promise<void>(resolve => { spawnWaiters.push(resolve) })
+  }
+  activeSpawns++
+}
+
 /** 直接 spawn PTY（供 harnessAgent 工具调用，不走 IPC）。
  *  自动注入 --permission-mode acceptEdits，失败时自动重试。 */
 export async function spawnPtySession(projectPath: string, command?: string, args?: string[]): Promise<{ success: boolean; pid?: number; sessionId?: string; message?: string }> {
+  await acquireSpawnSlot()
+  try {
+    return await spawnPtySessionImpl(projectPath, command, args)
+  } finally {
+    releaseSpawnSlot()
+  }
+}
+
+/** 确保 Claude Code 全局配置文件完整性。
+ *  多实例并发写入 C:\Users\admin\.claude.json 可能导致 JSON 截断，
+ *  损坏后所有 claude 实例启动时直接 exit code 1。 */
+function ensureClaudeConfigIntegrity(): void {
+  const homeDir = process.env.USERPROFILE || process.env.HOME || 'C:\\Users\\admin'
+  const configPath = path.join(homeDir, '.claude.json')
+  if (!fs.existsSync(configPath)) return
+
+  try {
+    JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+    return // 文件完好
+  } catch {
+    console.warn('[PTY] .claude.json 损坏，尝试从备份恢复...')
+  }
+
+  // 从备份目录找最新有效备份
+  const backupDir = path.join(homeDir, '.claude', 'backups')
+  if (fs.existsSync(backupDir)) {
+    const backups = fs.readdirSync(backupDir)
+      .filter(f => f.startsWith('.claude.json.backup.'))
+      .map(f => ({ name: f, path: path.join(backupDir, f), mtime: fs.statSync(path.join(backupDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime)
+
+    for (const bk of backups) {
+      try {
+        const content = fs.readFileSync(bk.path, 'utf-8')
+        const parsed = JSON.parse(content)
+        // 有效备份必须包含基本字段
+        if (parsed && typeof parsed === 'object') {
+          fs.writeFileSync(configPath, content, 'utf-8')
+          console.log('[PTY] .claude.json 已从备份恢复:', bk.name)
+          return
+        }
+      } catch { /* 下一个 */ }
+    }
+  }
+
+  // 无有效备份 → 写入最小合法配置
+  const minimal = { migrationVersion: 13, seenNotifications: {} }
+  fs.writeFileSync(configPath, JSON.stringify(minimal, null, 2), 'utf-8')
+  console.log('[PTY] .claude.json 无有效备份，已重建最小配置')
+}
+
+async function spawnPtySessionImpl(projectPath: string, command?: string, args?: string[]): Promise<{ success: boolean; pid?: number; sessionId?: string; message?: string }> {
   const key = normPath(projectPath)
+
+  // 预检：修复可能损坏的全局 claude.json（多实例并发写入常见问题）
+  ensureClaudeConfigIntegrity()
   const existing = sessions.get(key)
   if (existing) {
     console.log('[PTY] 关闭已有会话:', existing.sessionId)
@@ -221,6 +611,9 @@ export async function spawnPtySession(projectPath: string, command?: string, arg
     sessions.delete(key)
     ptyReady.delete(key)
     recentOutput.delete(key)
+    rawRecentOutput.delete(key)
+    messageStores.delete(key)
+    readableBuffer.delete(key)
   }
   const rawCmd = command || resolveClaudePath()
   const rawArgs = args || []
@@ -279,6 +672,14 @@ async function spawnWithRetry(file: string, args: string[], key: string, isClaud
         if (!settings.env) settings.env = {}
         settings.env.ANTHROPIC_API_KEY = activeKeyInfo.key
         settings.env.ANTHROPIC_BASE_URL = 'https://api.deepseek.com/anthropic'
+        // DeepSeek 模型名映射：Claude Code 内部使用 claude-* 模型名，DeepSeek 不认识
+        // 必须显式指定，否则 Claude Code 发的 model 字段对不上 → 卡死/乱码
+        // 参考: deepclaude 项目的 settings.json 最佳实践
+        settings.env.ANTHROPIC_MODEL = 'deepseek-v4-pro'
+        settings.env.ANTHROPIC_SMALL_FAST_MODEL = 'deepseek-v4-flash'
+        // 新项目默认跳过信任对话框 + 默认接受编辑，避免首次启动时卡住
+        if (settings.hasTrustDialogAccepted !== true) settings.hasTrustDialogAccepted = true
+        if (!settings.defaultMode) settings.defaultMode = 'acceptEdits'
         fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8')
         console.log('[PTY] 已写入 .claude/settings.json —', key.slice(-40))
       } catch (e) { /* settings write failed, still have env var + auto-answer as fallback */ }
@@ -389,6 +790,7 @@ async function spawnWithRetry(file: string, args: string[], key: string, isClaud
       }
       feedTokenTracker(key, data)
       appendRecentOutput(key, data)
+      try { appendRawOutput(key, data) } catch (e) { /* 聚合失败不阻塞 PTY 数据流 */ }
       sendToRenderer('pty:data', key, data)
       feedCollector(key, data)
     })
@@ -401,6 +803,9 @@ async function spawnWithRetry(file: string, args: string[], key: string, isClaud
       projectTokenAcc.delete(key)
       ptyReady.delete(key)
       recentOutput.delete(key)
+      rawRecentOutput.delete(key)
+      messageStores.delete(key)
+    readableBuffer.delete(key)
       autoReplyTimes.delete(key)
 
       if (!resolved && attempt < 2) {
@@ -409,6 +814,9 @@ async function spawnWithRetry(file: string, args: string[], key: string, isClaud
         console.log(`[PTY] ${delay}ms 后重试 (attempt ${attempt + 1})`)
         resolved = true
         sessions.delete(key)
+        rawRecentOutput.delete(key)
+        messageStores.delete(key)
+    readableBuffer.delete(key)
         setTimeout(async () => {
           const result = await spawnWithRetry(file, args, key, isClaude, attempt + 1)
           if (result.success) {
@@ -420,6 +828,9 @@ async function spawnWithRetry(file: string, args: string[], key: string, isClaud
       } else {
         resolved = true
         sessions.delete(key)
+        rawRecentOutput.delete(key)
+        messageStores.delete(key)
+    readableBuffer.delete(key)
         sendToRenderer('pty:exit', key, exitCode)
       }
     })
@@ -595,6 +1006,16 @@ function cleanAgentOutput(raw: string): string {
     if (/^(Welcome back|Tips for getting|Run \/init|What.s new|Internal fixes|API Usage Billing)/i.test(plain)) return false
     if (/^\d+\s*tokens?\s*·\s*thinking/i.test(plain)) return false
     if (/^[✻✽✢✶\s]+$/.test(plain)) return false
+    // 思考动画残片：almost done thinking / thought for Xs
+    if (/almost done thinking/i.test(plain)) return false
+    if (/thought for \d+s\)/i.test(plain)) return false
+    if (/^·\s*(Thinking|Working|Doing)…?\s*$/i.test(plain)) return false
+    // TUI 页脚/状态栏残片
+    if (/⏵⏵.*accept edits/i.test(plain)) return false
+    if (/^●\s*high\s*·\s*\/effort/i.test(plain)) return false
+    if (/^Resume this session with:/i.test(plain)) return false
+    if (/Claude Code 会话已结束/i.test(plain)) return false
+    if (/^●\s*(Wait|Propagating)…?/i.test(plain)) return false
     return true
   })
 
@@ -636,6 +1057,9 @@ export function killPtySession(projectPath?: string): { success: boolean; messag
       session.pty.kill()
       sessions.delete(key)
       ptyReady.delete(key)
+      rawRecentOutput.delete(key)
+      messageStores.delete(key)
+    readableBuffer.delete(key)
       return { success: true }
     }
     return { success: false, message: '无活跃的 PTY 会话' }
@@ -644,15 +1068,99 @@ export function killPtySession(projectPath?: string): { success: boolean; messag
     s.pty.kill()
     sessions.delete(k)
     ptyReady.delete(k)
+    rawRecentOutput.delete(k)
+    messageStores.delete(k)
+    readableBuffer.delete(k)
   }
   return { success: true }
 }
 
-/** 获取最近 PTY 输出（供 harnessAgent read_project_chat 工具读取实时终端内容） */
-export function getRecentPtyOutput(projectPath: string, maxLines: number = 100): string {
-  const lines = recentOutput.get(normPath(projectPath))
+/** 获取最近 PTY 输出（供 harnessAgent read_project_chat 工具读取实时终端内容）。
+ *  主数据源：messageStores.responses（主进程直接捕获，无 IPC 依赖）+ chatMessages（Chat UI 推送）。
+ *  辅助数据源：对话框 + 可读终端输出。 */
+export function getRecentPtyOutput(projectPath: string, _maxLines: number = 500): string {
+  const key = normPath(projectPath)
+  const parts: string[] = []
+
+  // 1. 主进程直接捕获的 ● 响应（messageStores.responses — 零 IPC 延迟，永远最新）
+  const msgs = messageStores.get(key)
+  if (msgs && msgs.responses.length > 0) {
+    const recent = msgs.responses.slice(-20)
+    parts.push('💬 项目 AI 回复 (实时):')
+    parts.push('─'.repeat(40))
+    for (const r of recent) {
+      // 清洗 TUI 残留：去除行内 ✻/✽/✢ 等状态标记和尾部时间戳
+      const clean = r
+        .replace(/[✻✽✢✶✹✺✼✾·⏳●]\s*(Cooked|Baked|Brewed|Crunched|Churned|Worked|Thundering|Puttering|Tempering|Sautéed|Fermenting|Fiddle-faddling|Wibbling|Boogieing|Dilly-dallying|Spelunking|Architecting|Actualizing|Noodling|Mulling|Pondering|Musing|Dwelling|Stewing|Brooding|Ruminating|Perking|Lazing|Infusing|Sipping|Crafting|Deciphering|Orchestrat|Julienning|Bootstrapping|Warping|Stirring|Generat|Compil|Execut|Analyz|Process|Search|Loading|Working|Doing|Thinking|Simmering)\s+for\s+\d+s?/gi, '')
+        .replace(/[✻✽✢✶✹✺✼✾·⏳]/g, '')
+        .replace(/\s*\d+s\s*·\s*thinking\s*/gi, '')
+        .replace(/❯/g, '')
+        .trim()
+      if (!clean) continue
+      parts.push(`🤖 ${clean.slice(0, 800)}`)
+    }
+    parts.push('')
+  }
+
+  // 2. Chat UI 已处理消息（补充用户消息 + 系统消息）
+  const uiMsgs = chatMessages.get(key)
+  if (uiMsgs && uiMsgs.length > 0) {
+    const userAndSys = uiMsgs.filter(m => m.role === 'user' || m.role === 'system')
+    if (userAndSys.length > 0) {
+      const recent = userAndSys.slice(-10)
+      parts.push('👤 用户/系统消息 (来自 Chat UI):')
+      parts.push('─'.repeat(40))
+      for (const m of recent) {
+        const roleTag = m.role === 'user' ? '👤' : '📢'
+        const clean = m.content.replace(/\x1b\[[0-9;]*m/g, '').trim()
+        if (!clean) continue
+        parts.push(`${roleTag} ${clean.slice(0, 500)}`)
+      }
+      parts.push('')
+    }
+  }
+
+  // 3. 对话框/选项
+  if (msgs && msgs.dialogs.length > 0) {
+    parts.push('⚠️ 对话框/选项:')
+    for (const d of msgs.dialogs) parts.push(`  ${d}`)
+    parts.push('')
+  }
+
+  // 4. 如果以上全空 → 回退到 readableBuffer
+  if (parts.length === 0) {
+    const readable = readableBuffer.get(key)
+    if (readable && readable.length > 0) {
+      const recent = readable.slice(-200)
+      const unique: string[] = []
+      let prev = ''
+      for (const line of recent) {
+        if (!line || line === prev) continue
+        prev = line
+        unique.push(line)
+      }
+      const output = unique.join('\n').trim()
+      if (output) {
+        parts.push('📡 实时终端输出:')
+        parts.push('─'.repeat(40))
+        parts.push(output.length > 3000 ? '…' + output.slice(-3000) : output)
+      }
+    }
+  }
+
+  if (parts.length === 0) return ''
+  const result = parts.join('\n').trim()
+  return result || ''
+}
+
+/** 获取最近 PTY 错误快照（供 harnessAgent diagnose_project 工具使用）。
+ *  返回清洗过的状态行 + 原始最近输出（保留错误信息用于模式匹配） */
+export function getPtyErrorSnapshot(projectPath: string, maxLines: number = 150): string {
+  const lines = rawRecentOutput.get(normPath(projectPath))
   if (!lines || lines.length === 0) return ''
-  return lines.slice(-maxLines).join('\n')
+  const recent = lines.slice(-maxLines)
+  // 不做清洗 — 保留原始输出用于错误模式匹配（含 ANSI 但 diagnoseErrors 用 regex 不care）
+  return recent.join('\n').slice(-6000)
 }
 
 /** 直接查询 PTY 状态（供 harnessAgent 工具调用，不走 IPC） */
@@ -714,12 +1222,26 @@ function wrapCommand(cmd: string, args: string[]): { file: string; args: string[
 }
 
 function sendToRenderer(channel: string, projectPath: string, ...args: unknown[]) {
-  console.log(`[PTY] ${channel} → renderer, proj:`, projectPath, 'wc ok:', !!mainWindow?.webContents)
-  mainWindow?.webContents.send(channel, projectPath, ...args)
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  try {
+    mainWindow.webContents.send(channel, projectPath, ...args)
+  } catch {
+    // 渲染进程已销毁（白屏/崩溃），静默丢弃
+  }
 }
 
 export function registerPtyIpc(window: BrowserWindow) {
   mainWindow = window
+
+  // 窗口关闭/崩溃时清理所有 PTY 会话，防止 sendToRenderer 死循环刷屏
+  window.on('closed', () => {
+    console.log('[PTY] 窗口已关闭，清理全部 PTY 会话')
+    for (const session of sessions.values()) {
+      try { session.pty.kill() } catch {}
+    }
+    sessions.clear()
+    mainWindow = null
+  })
 
   ipcMain.handle('pty:spawn', async (_event, projectPath: string, command?: string, args?: string[]) => {
     return spawnPtySession(projectPath, command, args)

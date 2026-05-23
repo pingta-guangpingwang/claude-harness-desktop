@@ -346,7 +346,6 @@ export function registerPluginIpc(mainWindow: BrowserWindow): void {
         icon: '🚀',
         builtin: true,
         provides: [
-          { type: 'ai.tool', id: 'generate_launch_scripts', description: '生成一键启动脚本' },
           { type: 'command', id: 'project:check-launch-bat', description: '检查启动脚本是否存在' },
           { type: 'command', id: 'project:generate-launch-bat', description: '生成单项目启动脚本' },
           { type: 'command', id: 'project:launch', description: '执行启动脚本' },

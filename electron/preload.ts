@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   browseFolder: () => ipcRenderer.invoke('dbghf:browse-folder'),
   browseIndividualProject: () => ipcRenderer.invoke('dbghf:browse-individual-project'),
   listDBHTProjects: (rootPath: string) => ipcRenderer.invoke('dbghf:list-projects', rootPath),
-  openFolder: (folderPath: string) => ipcRenderer.invoke('dbghf:open-folder'),
+  openFolder: (folderPath: string) => ipcRenderer.invoke('dbghf:open-folder', folderPath),
 
   // ============ Horse Farm Data ============
   saveHorseFarmData: (projectPath: string, data: { requirements?: string; summary?: string }) =>
@@ -135,6 +135,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sessionGet: (projectPath: string, sessionId: string) => ipcRenderer.invoke('session:get', projectPath, sessionId),
   sessionDelete: (projectPath: string, sessionId: string) => ipcRenderer.invoke('session:delete', projectPath, sessionId),
   sessionSave: (session: any) => ipcRenderer.invoke('session:save', session),
+  chatPushMessages: (projectPath: string, messages: any[]) => ipcRenderer.invoke('chat:pushMessages', projectPath, messages),
 
   // ============ Audit (v3.0) ============
   auditGetProjectEvents: (projectPath: string) => ipcRenderer.invoke('audit:get-project-events', projectPath),

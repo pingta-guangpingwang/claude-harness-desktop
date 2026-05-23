@@ -150,7 +150,7 @@ export function createBuiltinCommands(): CommandDefinition[] {
     // ==== 系统 ====
     {
       name: 'broadcast',
-      description: '向全部在线项目广播命令',
+      description: '向全部在线项目广播命令（直接写入终端，不经过驾驭智能体）',
       summary: '广播命令',
       params: [
         { name: 'command', type: 'string', description: '要执行的命令', required: true },
@@ -161,12 +161,19 @@ export function createBuiltinCommands(): CommandDefinition[] {
       async execute(args, ctx): Promise<any> {
         const cmd = (args.command as string) || (args._0 as string) || ''
         if (!cmd) return { success: false, output: '请输入要广播的命令' }
+        // ⚠️ 此命令直接写入 PTY，不经过驾驭智能体的 busy 保护。
+        // 适合快速操作。复杂任务请通过对话让驾驭智能体用 task_project/broadcast 工具委派。
         const results: string[] = []
         for (const id of ctx.projectIds) {
           const name = ctx.projectNames.get(id) || id.split('\\').pop() || id
           const s = getPtyStatus(id)
           if (!s.connected) {
             results.push(`⚠️ ${name}: 离线，跳过`)
+            continue
+          }
+          // 检查是否最近有活动（30s 内），有则警告可能打断正在进行的任务
+          if (Date.now() - s.lastDataAt < 30000) {
+            results.push(`⚠️ ${name}: 最近活跃中，跳过（避免打断）`)
             continue
           }
           writeToPty(id, cmd + '\r')

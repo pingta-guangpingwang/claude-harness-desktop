@@ -25,8 +25,33 @@ function lastLines(text: string, n: number): string {
 export const ChatBubble: React.FC<{ message: ChatMessage; embedded?: boolean }> = React.memo(({ message, embedded }) => {
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
+  const isThinking = isSystem && message.content.startsWith('🧠')
   const compact = embedded
   const [expanded, setExpanded] = useState(false)
+
+  // 思考状态气泡 — 紧凑单行，脉冲动画
+  if (isThinking) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        marginBottom: compact ? 4 : 6, padding: '2px 8px',
+        opacity: 0.7,
+      }}>
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: 'var(--app-warning)',
+          animation: 'hf-pulse 1.2s ease-in-out infinite',
+          flexShrink: 0,
+        }} />
+        <span style={{
+          fontSize: 11, color: 'var(--app-text-secondary)',
+          fontStyle: 'italic', fontFamily: 'var(--app-font-sans)',
+        }}>
+          {message.content}
+        </span>
+      </div>
+    )
+  }
 
   const totalLines = lineCount(message.content)
   const collapsible = !isUser && !message.isResponse && totalLines > COLLAPSE_LINES
