@@ -218,7 +218,8 @@ export class AgentLoop {
       const llmSpanId = this.tracer.startSpan('llm_call', {
         messageCount: this.messages.length,
         estimatedTokens: estimateMessagesTokens(this.messages),
-      })（捕获中断信号 + 网络瞬断重试，避免 AbortError/TypeError 泄漏到前端显示）
+      })
+      // 捕获中断信号 + 网络瞬断重试，避免 AbortError/TypeError 泄漏到前端显示
       let response: Awaited<ReturnType<typeof this.callLLMStream>>
       let lastError: any = null
       let llmSuccess = false
