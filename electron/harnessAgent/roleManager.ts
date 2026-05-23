@@ -165,19 +165,23 @@ export class RoleManager {
   inferRole(userMessage: string): { roleId: string; confidence: number; reason: string } {
     const msg = userMessage.toLowerCase()
     let bestRole = 'ceo'
-    let bestScore = 1 // CEO 基准分
+    let bestScore = 0
+    let bestMatchLen = 0 // 平局时用关键词累计长度决胜负
 
     for (const [id, role] of this.roles) {
       if (role.isDefault) continue
       let score = 0
+      let matchLen = 0
       for (const keyword of role.triggerKeywords) {
         if (msg.includes(keyword.toLowerCase())) {
           score += 1
+          matchLen += keyword.length
         }
       }
-      if (score > bestScore) {
+      if (score > bestScore || (score === bestScore && matchLen > bestMatchLen)) {
         bestScore = score
         bestRole = id
+        bestMatchLen = matchLen
       }
     }
 
