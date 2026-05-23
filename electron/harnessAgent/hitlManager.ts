@@ -22,7 +22,7 @@ export class HITLManager {
     timeout: ReturnType<typeof setTimeout>
   } | null = null
   private confirmTimeoutMs: number
-  private enabled: boolean = true
+  private enabled: boolean = false
 
   constructor(confirmTimeoutMs: number = 120_000) {
     this.confirmTimeoutMs = confirmTimeoutMs

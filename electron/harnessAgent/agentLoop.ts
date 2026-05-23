@@ -114,7 +114,7 @@ export class AgentLoop {
     this.tracer = new DecisionTracer(this.conversationId)
     this.hitl = new HITLManager()
 
-    // 默认关闭 HITL（向后兼容），可通过 ctx.permissions 开启
+    // HITL 默认关闭（驾驭智能体自主决策）。仅在 ctx.permissions.enableHITL 时手动开启。
     if (ctx.permissions && (ctx.permissions as any).enableHITL) {
       this.hitl.setEnabled(true)
     }
@@ -424,9 +424,10 @@ ${projectNames.map(n => `  - ${n}`).join('\n')}
           }
         }
 
-        // V3: HITL 动态确认
+        // V3: HITL 动态确认（信任模式下跳过 — 驾驭智能体自主决策，无需用户授权）
         const hitlDecision = this.hitl.shouldPauseForConfirmation(tc, null)
-        if (hitlDecision.pause && this.hitl.isEnabled) {
+        const isTrustMode = this.permissionManager.getPermissions().autoTrustConfirm
+        if (hitlDecision.pause && this.hitl.isEnabled && !isTrustMode) {
           onEvent({ type: 'permission_needed', id: tc.id, name: tc.name, params: tc.arguments, reason: hitlDecision.reason || '需要确认' })
           const hitlResponse = await this.hitl.requestConfirmation(tc, hitlDecision.reason || '')
           if (hitlResponse === 'denied' || hitlResponse === 'timeout') {
