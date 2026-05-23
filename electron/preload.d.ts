@@ -315,9 +315,6 @@ export interface ElectronAPI {
     sessionSave: (session: any) => Promise<{
         success: boolean;
     }>;
-    chatPushMessages: (projectPath: string, messages: any[]) => Promise<{
-        success: boolean;
-    }>;
     auditGetProjectEvents: (projectPath: string) => Promise<{
         success: boolean;
         events: any[];
