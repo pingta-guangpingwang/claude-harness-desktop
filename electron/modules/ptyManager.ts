@@ -1104,10 +1104,12 @@ export function getRecentPtyOutput(projectPath: string, _maxLines: number = 500)
     parts.push('💬 项目 AI 回复 (实时):')
     parts.push('─'.repeat(40))
     for (const r of recent) {
-      // 清洗 TUI 残留：去除行内 ✻/✽/✢ 等状态标记和尾部时间戳
+      // 清洗 TUI 残留：先全量剥离 ANSI，再去除 spinner 标记和尾部时间戳
       const clean = r
-        .replace(/[✻✽✢✶✹✺✼✾·⏳●]\s*(Cooked|Baked|Brewed|Crunched|Churned|Worked|Thundering|Puttering|Tempering|Sautéed|Fermenting|Fiddle-faddling|Wibbling|Boogieing|Dilly-dallying|Spelunking|Architecting|Actualizing|Noodling|Mulling|Pondering|Musing|Dwelling|Stewing|Brooding|Ruminating|Perking|Lazing|Infusing|Sipping|Crafting|Deciphering|Orchestrat|Julienning|Bootstrapping|Warping|Stirring|Generat|Compil|Execut|Analyz|Process|Search|Loading|Working|Doing|Thinking|Simmering)\s+for\s+\d+s?/gi, '')
-        .replace(/[✻✽✢✶✹✺✼✾·⏳]/g, '')
+        .replace(/\x1b\[[0-9;:?>=<]*[A-Za-z@-~]/g, '')  // 全量 CSI 序列（含光标移动/颜色/擦除）
+        .replace(/\x1b\][^\x07]*\x07/g, '')  // OSC 序列
+        .replace(/[✻✽✢✶✹✺✼✾·⏳●🧠]\s*(Cooked|Baked|Brewed|Crunched|Churned|Worked|Thundering|Puttering|Tempering|Sautéed|Fermenting|Fiddle-faddling|Frosting|Wibbling|Boogieing|Dilly-dallying|Spelunking|Architecting|Actualizing|Noodling|Mulling|Pondering|Musing|Dwelling|Stewing|Brooding|Ruminating|Perking|Lazing|Infusing|Sipping|Crafting|Deciphering|Orchestrat|Julienning|Bootstrapping|Warping|Stirring|Generat|Compil|Execut|Analyz|Process|Search|Loading|Working|Doing|Thinking|Simmering)\s+for\s+\d+s?/gi, '')
+        .replace(/[✻✽✢✶✹✺✼✾·⏳🧠●]/g, '')
         .replace(/\s*\d+s\s*·\s*thinking\s*/gi, '')
         .replace(/❯/g, '')
         .trim()

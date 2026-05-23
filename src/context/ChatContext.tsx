@@ -151,8 +151,8 @@ function cleanPtyOutput(text: string): { clean: string; status: string | null } 
   for (const line of lines) {
     const trimmed = line.replace(/\x1b\[[0-9;]*m/g, '').trim()
     if (!trimmed) continue
-    // Claude Code spinner 状态行 + orchestrating 状态
-    if (/^[⏳✻✽✢✶✹✺✼✾·•]\s*(Scurrying|Simmering|Brewed|Crunched|Wibbling|Boogieing|Orchestrat|thinking|Loading|almost done)/i.test(trimmed)) continue
+    // Claude Code spinner 状态行 + orchestrating 状态（v2 新增 ● 🧠 Frosting）
+    if (/^[⏳✻✽✢✶✹✺✼✾·•●🧠]\s*(Scurrying|Simmering|Brewed|Crunched|Wibbling|Boogieing|Frosting|Orchestrat|thinking|Loading|Working|almost done)/i.test(trimmed)) continue
     // 纯装饰分隔线
     if (/^[-━─=–—]{6,}$/.test(trimmed)) continue
     // 快捷提示/横幅行
@@ -177,9 +177,17 @@ function cleanPtyOutput(text: string): { clean: string; status: string | null } 
     // Searched for / Reading file 状态行
     if (/^(Searched for|Reading)\s*\d/i.test(trimmed)) continue
     // 纯 spinner 字符残留
-    if (/^[⏳✻✽✢✶✹✺✼✾·•\s]+$/.test(trimmed)) continue
+    if (/^[⏳✻✽✢✶✹✺✼✾·•●🧠\s]+$/.test(trimmed)) continue
     // 单字符/短数字残留（ANSI 碎片）
     if (/^[a-zA-Z0-9]{1,2}$/.test(trimmed)) continue
+    // Claude Code v2 状态栏残片 / token 行
+    if (/^(?:acceptedits|edits)\s*(on|off)/i.test(trimmed)) continue
+    if (/↓\s*to\s*manage/i.test(trimmed)) continue
+    if (/Running in the background/i.test(trimmed)) continue
+    if (/[↑↓]\s*[\d.]+[km]?\s*tokens?/i.test(trimmed)) continue
+    if (/thought\s+for\s+\d+s/i.test(trimmed)) continue
+    if (/^🧠\s*(Working|Almost done|Done)/i.test(trimmed)) continue
+    if (/^●\s*\w+…/i.test(trimmed) && trimmed.length < 40) continue
     filtered.push(line)
   }
 

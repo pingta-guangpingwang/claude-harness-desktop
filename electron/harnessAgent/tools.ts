@@ -736,8 +736,8 @@ function stripAnsiAndNoise(raw: string): string {
     if (!t) return false
     // 纯 TUI 动画帧
     if (/^[✻✽✢✶✹✺✼✾·⏳🧠●○◉◎⏺⏸▶▸*\s▐▌▛▜▟▙▘▝▀▄█▊▎▌▏▍▋│├┤┼╺╍┄┅┈┉🔄]+$/.test(t)) return false
-    // TUI 状态行（spinner + 动词 + 耗时 + token）
-    if (/^[✻✽✢✶✹✺✼✾·*\b].*(?:think|work|brew|scurry|simmer|boogie|wibbl|crystal|gallop|saut|enchant|embellish|dilly|temper|putter|churn|architect|decipher|spelunk|craft)/i.test(t) && t.length < 80) return false
+    // TUI 状态行（spinner + 动词 + 耗时 + token）→ 含 v2 Frosting
+    if (/^[✻✽✢✶✹✺✼✾·*●🧠\b].*(?:think|work|brew|scurry|simmer|boogie|wibbl|frost|crystal|gallop|saut|enchant|embellish|dilly|temper|putter|churn|architect|decipher|spelunk|craft)/i.test(t) && t.length < 80) return false
     // 状态变体
     if (/(?:almost|nearly)\s+done\s+(?:think|work)/i.test(t) && t.length < 80) return false
     if (/^(?:still|more)\s+(?:think|work)/i.test(t)) return false
@@ -748,7 +748,8 @@ function stripAnsiAndNoise(raw: string): string {
     // 分隔线
     if (/^[-━─=–—╭╮╰╯├┤┼]{6,}$/.test(t)) return false
     // TUI 模式指示器
-    if (/^(?:acceptedits\s*(?:on|off)|esctointerrupt|ctrl\+o to expand)$/i.test(t)) return false
+    if (/^(?:acceptedits|edits)\s*(?:on|off)/i.test(t)) return false
+    if (/^(?:esctointerrupt|ctrl\+[obcr]|↓\s*to\s*manage|Running in the background)/i.test(t)) return false
     if (/^\*\s*high\s*·\s*\/effort/i.test(t)) return false
     // 系统消息
     if (/^Resume this session with:/i.test(t)) return false
