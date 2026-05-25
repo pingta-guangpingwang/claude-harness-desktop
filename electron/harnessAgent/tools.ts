@@ -4,6 +4,7 @@ import { registerTool, getAllTools, executeTool } from './toolRegistry'
 import { spawnPtySession, killPtySession, getPtyStatus, writeToPty, sendAndCollect, getRecentPtyOutput, getPtyErrorSnapshot } from '../modules/ptyManager.js'
 import { taskQueue, type AgentTask } from './taskQueue.js'
 import { db } from '../modules/database.js'
+import { searchResourcesTool, addResourceTool, listResourcesTool, suggestResourceTool, readPendingResourcesTool, updatePendingItemTool } from './resourceRetriever.js'
 import { notifyProjectAdded } from '../modules/projectNotifier.js'
 import { searchKnowledge, diagnoseErrors } from './knowledge.js'
 import fs from 'fs'
@@ -1294,6 +1295,7 @@ pause
     }
 
     results.unshift(`已为 ${results.filter(r => r.startsWith('✅')).length}/${paths.length} 个项目生成启动脚本`)
+    results.push(`\n⚠️ 编码提醒：生成的 .bat 已包含 chcp 65001（UTF-8 编码），但如果让项目 AI 直接在终端执行命令而不通过 .bat，务必在 task 中告诉它先执行 chcp 65001，否则 Windows CMD 的 GBK 默认编码会导致中文乱码。`)
     return { success: true, output: results.join('\n') }
   },
 }
@@ -1914,4 +1916,12 @@ export function registerAllTools(): void {
   // P-INFRA — CEO诊断与知识库
   registerTool(searchKnowledgeTool)
   registerTool(diagnoseProjectTool)
+  // P4 — 资源仓库检索
+  registerTool(searchResourcesTool)
+  registerTool(addResourceTool)
+  registerTool(listResourcesTool)
+  // P4 — 待审核资源
+  registerTool(suggestResourceTool)
+  registerTool(readPendingResourcesTool)
+  registerTool(updatePendingItemTool)
 }

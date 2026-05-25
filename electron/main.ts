@@ -232,11 +232,22 @@ app.on('before-quit', () => {
   trayManager.destroy()
 })
 
-// 防止多个实例
+// 防止多个实例 — 自动杀掉旧实例后重启
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
-  console.log('[CHD] ⚠️ 检测到已有实例在运行，退出当前进程')
-  app.quit()
+  console.log('[CHD] ⚠️ 检测到已有实例在运行，正在关闭旧进程并重启...')
+  try {
+    const { execSync } = require('child_process')
+    // 杀掉所有其他 electron.exe 进程
+    execSync(`taskkill /F /IM electron.exe /FI "PID ne ${process.pid}"`, { timeout: 10000 })
+  } catch (e: any) {
+    // taskkill 没有匹配进程时会返回非零，忽略
+  }
+  // 等旧进程释放锁后重新启动
+  setTimeout(() => {
+    app.relaunch()
+    app.exit()
+  }, 500)
 } else {
   app.on('second-instance', () => {
     console.log('[CHD] 收到 second-instance 事件，显示主窗口')

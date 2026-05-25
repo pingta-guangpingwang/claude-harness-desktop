@@ -100,4 +100,71 @@ export function registerDbhtIpc(mainWindow: BrowserWindow | null) {
       return { success: false, message: e?.message || String(e) }
     }
   })
+
+  // ---- 项目元数据（评分/排序/边框色/备注） ----
+  ipcMain.handle('dbghf:get-project-metadata', async () => {
+    try {
+      const meta = await db.getProjectMetadata()
+      return { success: true, metadata: meta }
+    } catch (e: any) {
+      return { success: false, metadata: {}, message: String(e) }
+    }
+  })
+
+  ipcMain.handle('dbghf:set-project-rating', async (_, projectPath: string, rating: number) => {
+    try {
+      const meta = await db.getProjectMetadata()
+      meta[projectPath] = { ...(meta[projectPath] || {}), rating }
+      await db.setProjectMetadata(meta)
+      return { success: true }
+    } catch (e: any) {
+      return { success: false, message: String(e) }
+    }
+  })
+
+  ipcMain.handle('dbghf:set-project-border-color', async (_, projectPath: string, color: string) => {
+    try {
+      const meta = await db.getProjectMetadata()
+      meta[projectPath] = { ...(meta[projectPath] || {}), borderColor: color }
+      await db.setProjectMetadata(meta)
+      return { success: true }
+    } catch (e: any) {
+      return { success: false, message: String(e) }
+    }
+  })
+
+  ipcMain.handle('dbghf:set-project-order', async (_, orderedPaths: string[]) => {
+    try {
+      const meta = await db.getProjectMetadata()
+      for (let i = 0; i < orderedPaths.length; i++) {
+        meta[orderedPaths[i]] = { ...(meta[orderedPaths[i]] || {}), order: i }
+      }
+      await db.setProjectMetadata(meta)
+      return { success: true }
+    } catch (e: any) {
+      return { success: false, message: String(e) }
+    }
+  })
+
+  ipcMain.handle('dbghf:save-project-notes', async (_, projectPath: string, notes: string) => {
+    try {
+      const meta = await db.getProjectMetadata()
+      meta[projectPath] = { ...(meta[projectPath] || {}), notes }
+      await db.setProjectMetadata(meta)
+      return { success: true }
+    } catch (e: any) {
+      return { success: false, message: String(e) }
+    }
+  })
+
+  ipcMain.handle('dbghf:set-project-metadata', async (_, projectPath: string, updates: Record<string, any>) => {
+    try {
+      const meta = await db.getProjectMetadata()
+      meta[projectPath] = { ...(meta[projectPath] || {}), ...updates }
+      await db.setProjectMetadata(meta)
+      return { success: true }
+    } catch (e: any) {
+      return { success: false, message: String(e) }
+    }
+  })
 }

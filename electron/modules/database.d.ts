@@ -9,5 +9,7 @@ export declare const db: {
     setSetupCompleted: () => Promise<void>;
     getHubSettings: () => Promise<any>;
     setHubSettings: (data: any) => Promise<void>;
+    getProjectMetadata: () => Promise<any>;
+    setProjectMetadata: (data: any) => Promise<void>;
     DATA_DIR: string;
 };

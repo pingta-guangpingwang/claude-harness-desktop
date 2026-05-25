@@ -298,6 +298,300 @@ export async function registerHarnessIpc(window: BrowserWindow) {
       return { success: true, config }
     } catch (e) { return { success: false, error: String(e) } }
   })
+
+  // ---- 资源仓库管理 ----
+  ipcMain.handle('resource:status', async () => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const initialized = resourceStore.isInitialized()
+      return { success: true, initialized }
+    } catch (e) { return { success: false, initialized: false } }
+  })
+
+  ipcMain.handle('resource:query', async (_event, params: any) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      if (!resourceStore.isInitialized()) {
+        await resourceStore.loadManifests()
+      }
+      const resources = resourceStore.queryResources(params || {})
+      return { success: true, resources }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('resource:list', async (_event, repo?: string) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      if (!resourceStore.isInitialized()) {
+        await resourceStore.loadManifests()
+      }
+      const resources = resourceStore.getAllResources(repo as any)
+      return { success: true, resources }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('resource:detail', async (_event, id: string) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      if (!resourceStore.isInitialized()) {
+        await resourceStore.loadManifests()
+      }
+      const resource = await resourceStore.getResourceDetail(id)
+      return { success: true, resource }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('resource:add', async (_event, repo: string, resource: any) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const result = await resourceStore.addResource(resource, repo as any)
+      return result
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('resource:leaderboard', async (_event, category?: string, limit?: number) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      if (!resourceStore.isInitialized()) {
+        await resourceStore.loadManifests()
+      }
+      const leaderboard = resourceStore.getLeaderboard(category, limit)
+      return { success: true, leaderboard }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('resource:changes', async (_event, repo: string) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const changes = await resourceStore.getLocalChanges(repo as any)
+      return { success: true, changes }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  // ---- 资源仓库 Git 同步与贡献 ----
+  ipcMain.handle('resource:repo-status', async (_event, repo: string) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const status = await resourceStore.getRepoStatus(repo as any)
+      return { success: true, ...status }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('resource:check-updates', async (_event, repo: string) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const result = await resourceStore.checkForUpdates(repo as any)
+      return result
+    } catch (e) { return { success: false, hasUpdates: false, behind: 0, message: String(e) } }
+  })
+
+  ipcMain.handle('resource:sync-pull', async (_event, repo: string) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const result = await resourceStore.syncRepo(repo as any)
+      return result
+    } catch (e) { return { success: false, message: String(e), pulled: 0 } }
+  })
+
+  ipcMain.handle('resource:contribute-branch', async (_event, repo: string, branchName: string) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const result = await resourceStore.createContributionBranch(repo as any, branchName)
+      return result
+    } catch (e) { return { success: false, message: String(e) } }
+  })
+
+  ipcMain.handle('resource:contribute-commit', async (_event, repo: string, message: string) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const result = await resourceStore.commitChanges(repo as any, message)
+      return result
+    } catch (e) { return { success: false, message: String(e) } }
+  })
+
+  ipcMain.handle('resource:contribute-push', async (_event, repo: string, branchName: string) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const result = await resourceStore.pushBranch(repo as any, branchName)
+      return result
+    } catch (e) { return { success: false, message: String(e) } }
+  })
+
+  ipcMain.handle('resource:contribute-pr', async (_event, repo: string, branchName: string, title: string, body: string) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const result = await resourceStore.createPullRequest(repo as any, branchName, title, body)
+      return result
+    } catch (e) { return { success: false, message: String(e) } }
+  })
+
+  ipcMain.handle('resource:clone', async (_event, repo: string, remoteUrl?: string) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const result = await resourceStore.cloneRepo(repo as any, remoteUrl)
+      return result
+    } catch (e) { return { success: false, message: String(e) } }
+  })
+
+  // ---- 待审核资源管理 ----
+  ipcMain.handle('pending:list', async () => {
+    try {
+      const { pendingResourceStore } = await import('../modules/pendingResourceStore.js')
+      return { success: true, items: pendingResourceStore.items }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('pending:add', async (_event, item: any) => {
+    try {
+      const { pendingResourceStore } = await import('../modules/pendingResourceStore.js')
+      const id = `pend-${Date.now().toString(36)}`
+      pendingResourceStore.addItem({
+        id,
+        name: item.name || '',
+        resourceType: item.resourceType || 'prompt',
+        targetRepo: item.targetRepo || 'DeepBluePrompt',
+        category: item.category || 'other',
+        techStack: item.techStack || [],
+        sourceUrl: item.sourceUrl || '',
+        summary: item.summary || '',
+        rawContent: item.rawContent || '',
+        status: 'pending',
+        auditScore: 0,
+        auditNotes: '',
+        formattedContent: '',
+        auditedAt: '',
+        createdAt: new Date().toISOString(),
+      })
+      return { success: true, id }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('pending:remove', async (_event, id: string) => {
+    try {
+      const { pendingResourceStore } = await import('../modules/pendingResourceStore.js')
+      const ok = pendingResourceStore.removeItem(id)
+      return { success: ok }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('pending:update', async (_event, id: string, updates: any) => {
+    try {
+      const { pendingResourceStore } = await import('../modules/pendingResourceStore.js')
+      const ok = pendingResourceStore.updateItem(id, updates)
+      return { success: ok }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('pending:count', async () => {
+    try {
+      const { pendingResourceStore } = await import('../modules/pendingResourceStore.js')
+      return { success: true, count: pendingResourceStore.getPendingCount() }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('pending:approve', async (_event, id: string) => {
+    try {
+      const { pendingResourceStore } = await import('../modules/pendingResourceStore.js')
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const item = pendingResourceStore.getItem(id)
+      if (!item) return { success: false, error: 'not found' }
+      if (item.status === 'pending') {
+        return { success: false, error: '请先进行 AI 审核后再批准' }
+      }
+      const result = await resourceStore.addResource({
+        id: item.id,
+        name: item.name,
+        type: item.resourceType,
+        category: item.category,
+        tech_stack: item.techStack,
+        style_tags: [],
+        use_cases: [],
+        score: item.auditScore || 5.0,
+        rating_count: 0,
+        usage_count: 0,
+        source_url: item.sourceUrl,
+        summary: item.summary,
+        repo: item.targetRepo as any,
+        content: item.formattedContent || item.rawContent,
+      }, item.targetRepo as any)
+      if (result.success) {
+        pendingResourceStore.updateItem(id, { status: 'approved' })
+      }
+      return result
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('pending:approve-all', async (_event, repo?: string) => {
+    try {
+      const { pendingResourceStore } = await import('../modules/pendingResourceStore.js')
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const audited = pendingResourceStore.getItemsByStatus('audited')
+      const toApprove = repo ? audited.filter(i => i.targetRepo === repo) : audited
+      const results: Array<{ id: string; name: string; success: boolean; message: string }> = []
+      for (const item of toApprove) {
+        if (item.auditScore < 4) {
+          results.push({ id: item.id, name: item.name, success: false, message: '评分过低，跳过' })
+          continue
+        }
+        try {
+          const r = await resourceStore.addResource({
+            id: item.id,
+            name: item.name,
+            type: item.resourceType,
+            category: item.category,
+            tech_stack: item.techStack,
+            style_tags: [],
+            use_cases: [],
+            score: item.auditScore || 5.0,
+            rating_count: 0,
+            usage_count: 0,
+            source_url: item.sourceUrl,
+            summary: item.summary,
+            repo: item.targetRepo as any,
+            content: item.formattedContent || item.rawContent,
+          }, item.targetRepo as any)
+          if (r.success) {
+            pendingResourceStore.updateItem(item.id, { status: 'approved' })
+            results.push({ id: item.id, name: item.name, success: true, message: '已入库' })
+          } else {
+            results.push({ id: item.id, name: item.name, success: false, message: '写入失败' })
+          }
+        } catch (e: any) {
+          results.push({ id: item.id, name: item.name, success: false, message: String(e) })
+        }
+      }
+      return { success: true, results }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('pending:audit-trigger', async () => {
+    try {
+      const { pendingResourceStore } = await import('../modules/pendingResourceStore.js')
+      const items = pendingResourceStore.getItemsByStatus('pending')
+      if (items.length === 0) return { success: false, error: '没有待审核的资源' }
+      const itemList = items.map((item, i) =>
+        `${i + 1}. **${item.name}** | 类型:${item.resourceType} | 目标仓库:${item.targetRepo} | 分类:${item.category}
+   - 来源: ${item.sourceUrl || '无'}
+   - 摘要: ${item.summary}
+   - 原始内容(前500字): ${item.rawContent.slice(0, 500)}`
+      ).join('\n\n')
+      const prompt = `请审核以下 ${items.length} 条待审资源。对每一条资源：
+1. 评估质量(0-10分)和适用性
+2. 确认分类(类型、仓库)是否正确
+3. 生成标准化的 YAML frontmatter + 正文内容
+4. 使用 update_pending_item 工具逐条写入审核结果
+
+审核要点：
+- 资源是否完整可用？
+- 分类和类型是否正确？
+- 技术栈标注是否准确？
+- 内容格式是否符合对应仓库的 manifest 规范？
+
+待审列表：
+${itemList}`
+      return { success: true, prompt, count: items.length }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
 }
 
 function sendToRenderer(channel: string, ...args: unknown[]) {

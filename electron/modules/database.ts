@@ -70,5 +70,8 @@ export const db = {
   }),
   setHubSettings: (data: any) => write('hub-settings', data),
 
+  getProjectMetadata: () => read('project-metadata', {}),
+  setProjectMetadata: (data: any) => write('project-metadata', data),
+
   DATA_DIR,
 }

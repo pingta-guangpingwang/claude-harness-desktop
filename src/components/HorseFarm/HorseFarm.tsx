@@ -22,6 +22,7 @@ import { EfficiencyDashboard } from '../Productivity/EfficiencyDashboard'
 import { WorkflowEditor } from '../Workflow/WorkflowEditor'
 import { WorkflowTemplates } from '../Workflow/WorkflowTemplates'
 import { ResourceHub } from '../Eco/ResourceHub'
+import { ResourceMarket } from '../Eco/ResourceMarket'
 import { ConfigMigrator } from '../Eco/ConfigMigrator'
 import { TokenStatsPanel } from '../System/TokenStatsPanel'
 import { RuleEditor } from '../System/RuleEditor'
@@ -53,7 +54,7 @@ export default function HorseFarm() {
   const [detailPanel, setDetailPanel] = useState<{
     type: 'mindmap' | 'kb' | 'initLog' | 'chat' | 'audit' | 'harness' | 'cli' | 'plugins' | 'identity' | 'efficiency' | 'workflow' | 'eco' | 'system' | 'token' | null
     projectPath: string | null
-    ecoSubTab?: 'resources' | 'migrator'
+    ecoSubTab?: 'resources' | 'workshop' | 'migrator'
     systemSubTab?: 'rules' | 'audit' | 'perf'
     workflowSubTab?: 'editor' | 'templates'
   }>({ type: null, projectPath: null })
@@ -333,7 +334,7 @@ export default function HorseFarm() {
               color: detailPanel.type === 'plugins' ? '#f59e0b' : '#888',
               cursor: 'pointer', fontSize: '12px',
             }}>{t.horseFarm.headerPlugins}</button>
-          <button onClick={() => setDetailPanel(prev => prev.type === 'eco' ? { type: null, projectPath: null } : { type: 'eco', projectPath: null, ecoSubTab: 'resources' })}
+          <button onClick={() => setDetailPanel(prev => prev.type === 'eco' ? { type: null, projectPath: null } : { type: 'eco', projectPath: null, ecoSubTab: 'workshop' })}
             style={{
               padding: '4px 10px', borderRadius: '6px', border: '1px solid #444',
               background: detailPanel.type === 'eco' ? '#06b6d422' : 'transparent',
@@ -604,7 +605,7 @@ function CliToolsPanel({ projectIds, hfProjects, apiKey, model }: {
   )
 }
 
-function EcoPanel({ subTab, onTabChange }: { subTab: 'resources' | 'migrator'; onTabChange: (tab: 'resources' | 'migrator') => void }) {
+function EcoPanel({ subTab, onTabChange }: { subTab: 'resources' | 'workshop' | 'migrator'; onTabChange: (tab: 'resources' | 'workshop' | 'migrator') => void }) {
   const { t } = useI18n()
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -612,6 +613,12 @@ function EcoPanel({ subTab, onTabChange }: { subTab: 'resources' | 'migrator'; o
         display: 'flex', gap: 0, borderBottom: '1px solid #1e293b',
         padding: '0 12px',
       }}>
+        <button onClick={() => onTabChange('workshop')} style={{
+          padding: '6px 14px', border: 'none', background: 'transparent',
+          color: subTab === 'workshop' ? '#06b6d4' : '#94a3b8',
+          borderBottom: subTab === 'workshop' ? '2px solid #06b6d4' : '2px solid transparent',
+          cursor: 'pointer', fontSize: 11, fontWeight: subTab === 'workshop' ? 600 : 400,
+        }}>{t.eco.deepBlueWorkshop}</button>
         <button onClick={() => onTabChange('resources')} style={{
           padding: '6px 14px', border: 'none', background: 'transparent',
           color: subTab === 'resources' ? '#06b6d4' : '#94a3b8',
@@ -626,7 +633,7 @@ function EcoPanel({ subTab, onTabChange }: { subTab: 'resources' | 'migrator'; o
         }}>{t.eco.configMigrator}</button>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '14px' }}>
-        {subTab === 'resources' ? <ResourceHub /> : <ConfigMigrator />}
+        {subTab === 'workshop' ? <ResourceMarket /> : subTab === 'resources' ? <ResourceHub /> : <ConfigMigrator />}
       </div>
     </div>
   )

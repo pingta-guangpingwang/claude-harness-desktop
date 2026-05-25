@@ -8,6 +8,43 @@ export interface ElectronAPI {
   browseIndividualProject: () => Promise<{ success: boolean; path: string; name?: string }>
   listDBHTProjects: (rootPath: string) => Promise<{ success: boolean; projects: Array<{ path: string; name: string; repoPath: string; status: string; source: string }>; message?: string }>
   openFolder: (folderPath: string) => Promise<{ success: boolean }>
+  // Project Metadata (评分/排序/边框色/备注)
+  getProjectMetadata: () => Promise<{ success: boolean; metadata: Record<string, { rating?: number; order?: number; borderColor?: string; notes?: string }> }>
+  setProjectRating: (projectPath: string, rating: number) => Promise<{ success: boolean }>
+  setProjectBorderColor: (projectPath: string, color: string) => Promise<{ success: boolean }>
+  setProjectOrder: (orderedPaths: string[]) => Promise<{ success: boolean }>
+  saveSelectorProjectNotes: (projectPath: string, notes: string) => Promise<{ success: boolean }>
+  setProjectMetadata: (projectPath: string, updates: Record<string, any>) => Promise<{ success: boolean }>
+  // Resource Market（资源仓库）
+  resourceStatus: () => Promise<{ success: boolean; initialized: boolean }>
+  resourceQuery: (params: { query: string; repo?: string; type?: string; category?: string; maxResults?: number; minScore?: number }) => Promise<{ success: boolean; resources: Array<{ id: string; name: string; type: string; category: string; tech_stack: string[]; style_tags: string[]; score: number; source_url: string; summary: string; file: string; repo: string }> }>
+  resourceList: (repo?: string) => Promise<{ success: boolean; resources: Array<{ id: string; name: string; type: string; category: string; score: number; summary: string; repo: string }> }>
+  resourceDetail: (id: string) => Promise<{ success: boolean; resource: any }>
+  resourceAdd: (repo: string, resource: any) => Promise<{ success: boolean; path?: string }>
+  resourceLeaderboard: (category?: string, limit?: number) => Promise<{ success: boolean; leaderboard: Array<{ id: string; name: string; type: string; score: number }> }>
+  resourceChanges: (repo: string) => Promise<{ success: boolean; changes: Array<{ path: string; status: string }> }>
+  resourceRepoStatus: (repo: string) => Promise<{ success: boolean; exists: boolean; isGit: boolean; branch: string; remote: string; behind: number; ahead: number; changes: Array<{ path: string; status: string }>; lastCommit: { hash: string; message: string; date: string } | null }>
+  resourceCheckUpdates: (repo: string) => Promise<{ success: boolean; hasUpdates: boolean; behind: number; message: string }>
+  resourceSyncPull: (repo: string) => Promise<{ success: boolean; message: string; pulled: number }>
+  resourceContributeBranch: (repo: string, branchName: string) => Promise<{ success: boolean; message: string }>
+  resourceContributeCommit: (repo: string, message: string) => Promise<{ success: boolean; message: string }>
+  resourceContributePush: (repo: string, branchName: string) => Promise<{ success: boolean; message: string }>
+  resourceContributePR: (repo: string, branchName: string, title: string, body: string) => Promise<{ success: boolean; message: string; url?: string }>
+  resourceClone: (repo: string, remoteUrl?: string) => Promise<{ success: boolean; message: string }>
+  // Pending Resource Review
+  pendingList: () => Promise<{ success: boolean; items: Array<{
+    id: string; name: string; resourceType: string; targetRepo: string
+    category: string; techStack: string[]; sourceUrl: string; summary: string
+    rawContent: string; status: string; auditScore: number; auditNotes: string
+    formattedContent: string; auditedAt: string; createdAt: string
+  }>; error?: string }>
+  pendingAdd: (item: any) => Promise<{ success: boolean; id?: string; error?: string }>
+  pendingRemove: (id: string) => Promise<{ success: boolean; error?: string }>
+  pendingUpdate: (id: string, updates: any) => Promise<{ success: boolean; error?: string }>
+  pendingCount: () => Promise<{ success: boolean; count: number; error?: string }>
+  pendingApprove: (id: string) => Promise<{ success: boolean; path?: string; error?: string }>
+  pendingApproveAll: (repo?: string) => Promise<{ success: boolean; results: Array<{ id: string; name: string; success: boolean; message: string }>; error?: string }>
+  pendingAuditTrigger: () => Promise<{ success: boolean; prompt?: string; count?: number; error?: string }>
   // Horse Farm
   saveHorseFarmData: (projectPath: string, data: { requirements?: string; summary?: string }) => Promise<{ success: boolean; message?: string }>
   loadHorseFarmData: (projectPath: string) => Promise<{ success: boolean; exists?: boolean; requirements?: string; summary?: string; mindmapPath?: string; kbPath?: string }>

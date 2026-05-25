@@ -12,6 +12,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listDBHTProjects: (rootPath: string) => ipcRenderer.invoke('dbghf:list-projects', rootPath),
   openFolder: (folderPath: string) => ipcRenderer.invoke('dbghf:open-folder', folderPath),
 
+  // ============ Project Metadata (评分/排序/边框色/备注) ============
+  getProjectMetadata: () => ipcRenderer.invoke('dbghf:get-project-metadata'),
+  setProjectRating: (projectPath: string, rating: number) => ipcRenderer.invoke('dbghf:set-project-rating', projectPath, rating),
+  setProjectBorderColor: (projectPath: string, color: string) => ipcRenderer.invoke('dbghf:set-project-border-color', projectPath, color),
+  setProjectOrder: (orderedPaths: string[]) => ipcRenderer.invoke('dbghf:set-project-order', orderedPaths),
+  saveSelectorProjectNotes: (projectPath: string, notes: string) => ipcRenderer.invoke('dbghf:save-project-notes', projectPath, notes),
+  setProjectMetadata: (projectPath: string, updates: Record<string, any>) => ipcRenderer.invoke('dbghf:set-project-metadata', projectPath, updates),
+
   // ============ Horse Farm Data ============
   saveHorseFarmData: (projectPath: string, data: { requirements?: string; summary?: string }) =>
     ipcRenderer.invoke('horsefarm:save-data', projectPath, data),
@@ -46,6 +54,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('horsefarm:save-notes', projectPath, notes),
   loadProjectNotes: (projectPath: string) =>
     ipcRenderer.invoke('horsefarm:load-notes', projectPath),
+
+  // ============ Resource Market（资源仓库） ============
+  resourceStatus: () => ipcRenderer.invoke('resource:status'),
+  resourceQuery: (params: any) => ipcRenderer.invoke('resource:query', params),
+  resourceList: (repo?: string) => ipcRenderer.invoke('resource:list', repo),
+  resourceDetail: (id: string) => ipcRenderer.invoke('resource:detail', id),
+  resourceAdd: (repo: string, resource: any) => ipcRenderer.invoke('resource:add', repo, resource),
+  resourceLeaderboard: (category?: string, limit?: number) => ipcRenderer.invoke('resource:leaderboard', category, limit),
+  resourceChanges: (repo: string) => ipcRenderer.invoke('resource:changes', repo),
+  resourceRepoStatus: (repo: string) => ipcRenderer.invoke('resource:repo-status', repo),
+  resourceCheckUpdates: (repo: string) => ipcRenderer.invoke('resource:check-updates', repo),
+  resourceSyncPull: (repo: string) => ipcRenderer.invoke('resource:sync-pull', repo),
+  resourceContributeBranch: (repo: string, branchName: string) => ipcRenderer.invoke('resource:contribute-branch', repo, branchName),
+  resourceContributeCommit: (repo: string, message: string) => ipcRenderer.invoke('resource:contribute-commit', repo, message),
+  resourceContributePush: (repo: string, branchName: string) => ipcRenderer.invoke('resource:contribute-push', repo, branchName),
+  resourceContributePR: (repo: string, branchName: string, title: string, body: string) => ipcRenderer.invoke('resource:contribute-pr', repo, branchName, title, body),
+  resourceClone: (repo: string, remoteUrl?: string) => ipcRenderer.invoke('resource:clone', repo, remoteUrl),
+
+  // ============ Pending Resource Review ============
+  pendingList: () => ipcRenderer.invoke('pending:list'),
+  pendingAdd: (item: any) => ipcRenderer.invoke('pending:add', item),
+  pendingRemove: (id: string) => ipcRenderer.invoke('pending:remove', id),
+  pendingUpdate: (id: string, updates: any) => ipcRenderer.invoke('pending:update', id, updates),
+  pendingCount: () => ipcRenderer.invoke('pending:count'),
+  pendingApprove: (id: string) => ipcRenderer.invoke('pending:approve', id),
+  pendingApproveAll: (repo?: string) => ipcRenderer.invoke('pending:approve-all', repo),
+  pendingAuditTrigger: () => ipcRenderer.invoke('pending:audit-trigger'),
 
   // ============ Sandbox: DBHT Version Control ============
   snapshotBeforeTask: (projectPath: string, taskId: string, desc: string, summary: string) =>
