@@ -81,7 +81,14 @@ export function ResourceMarket() {
   const [auditing, setAuditing] = useState(false)
   const [approving, setApproving] = useState<string | null>(null)
   const [auditPrompt, setAuditPrompt] = useState('')
-  const [lang, setLang] = useState<'zh' | 'en'>('zh')
+  const [lang, setLang] = useState<'zh' | 'en' | 'bilingual'>('zh')
+  const nextLang = (l: 'zh' | 'en' | 'bilingual') => l === 'zh' ? 'en' : l === 'en' ? 'bilingual' : 'zh'
+  const langLabel = (l: 'zh' | 'en' | 'bilingual') => l === 'zh' ? '中' : l === 'en' ? 'EN' : '中+EN'
+  const fmtSummary = (zh: string, en?: string, max = 120) => {
+    if (lang === 'en' && en) return en.slice(0, max)
+    if (lang === 'bilingual' && en) return zh.slice(0, max / 2) + '\n' + en.slice(0, max / 2)
+    return zh.slice(0, max)
+  }
 
   useEffect(() => {
     loadStatus()
@@ -228,6 +235,7 @@ export function ResourceMarket() {
       if (res.success) {
         await loadStatus()
         await loadRepoStatuses()
+        loadResources()
       }
     } catch { /* ignore */ }
     setSyncing(null)
@@ -481,15 +489,15 @@ export function ResourceMarket() {
           )
         })}
         <span style={{ flex: 1 }} />
-        <button onClick={() => setLang(l => l === 'zh' ? 'en' : 'zh')}
-          title="切换中英文显示 / Toggle Chinese/English"
+        <button onClick={() => setLang(nextLang)}
+          title="中/EN/双语 / Chinese/English/Bilingual"
           style={{
             fontSize: '10px', padding: '3px 8px', borderRadius: '4px', fontWeight: 500,
             border: '1px solid #334155',
-            background: lang === 'en' ? '#2563eb22' : '#1e293b',
-            color: lang === 'en' ? '#60a5fa' : '#94a3b8', cursor: 'pointer',
+            background: lang !== 'zh' ? '#2563eb22' : '#1e293b',
+            color: lang !== 'zh' ? '#60a5fa' : '#94a3b8', cursor: 'pointer',
             fontFamily: 'monospace',
-          }}>{lang === 'zh' ? 'EN' : '中'}</button>
+          }}>{langLabel(lang)}</button>
         <button onClick={async () => { await loadRepoStatuses(); loadResources() }}
           title="刷新仓库状态"
           style={{
@@ -662,7 +670,7 @@ export function ResourceMarket() {
               暂无匹配资源，试试其他关键词或筛选条件
             </div>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', contain: 'layout style' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {filtered.map(item => {
               const isSel = selected?.id === item.id
               const sc = scoreColor(item.score)
@@ -680,8 +688,8 @@ export function ResourceMarket() {
                     </div>
                     <span style={{ fontSize: '12px', fontWeight: 700, color: sc, flexShrink: 0, marginLeft: '8px' }}>★ {item.score}</span>
                   </div>
-                  <div style={{ fontSize: '11px', color: '#cbd5e1', lineHeight: 1.4, marginBottom: '6px' }}>
-                    {lang === 'en' && item.summary_en ? item.summary_en.slice(0, 120) : item.summary.slice(0, 120)}
+                  <div style={{ fontSize: '11px', color: '#cbd5e1', lineHeight: 1.4, marginBottom: '6px', whiteSpace: 'pre-line' }}>
+                    {fmtSummary(item.summary, item.summary_en)}
                   </div>
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                     <span style={{ fontSize: '10px', color: '#64748b' }}>{REPO_LABELS[item.repo] || item.repo}</span>
@@ -706,15 +714,13 @@ export function ResourceMarket() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0' }}>{selected.name}</h4>
               <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                {selected.summary_en && (
-                  <button onClick={() => setLang(l => l === 'zh' ? 'en' : 'zh')} style={{
-                    background: lang === 'en' ? '#2563eb' : '#1e293b',
-                    border: '1px solid #334155', borderRadius: '4px',
-                    color: lang === 'en' ? '#fff' : '#94a3b8',
-                    cursor: 'pointer', fontSize: '11px', padding: '2px 8px',
-                    fontFamily: 'inherit',
-                  }}>{lang === 'zh' ? '中' : 'EN'}</button>
-                )}
+                <button onClick={() => setLang(nextLang)} style={{
+                  background: lang !== 'zh' ? '#2563eb' : '#1e293b',
+                  border: '1px solid #334155', borderRadius: '4px',
+                  color: lang !== 'zh' ? '#fff' : '#94a3b8',
+                  cursor: 'pointer', fontSize: '11px', padding: '2px 8px',
+                  fontFamily: 'inherit',
+                }}>{langLabel(lang)}</button>
                 <button onClick={() => { setSelected(null); setDetailBody('') }} style={{
                   background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '16px',
                 }}>✕</button>
@@ -734,8 +740,8 @@ export function ResourceMarket() {
                 </a>
               </div>
             )}
-            <div style={{ fontSize: '12px', color: '#e2e8f0', lineHeight: 1.6, marginBottom: '8px' }}>
-              {lang === 'en' && selected.summary_en ? selected.summary_en : selected.summary}
+            <div style={{ fontSize: '12px', color: '#e2e8f0', lineHeight: 1.6, marginBottom: '8px', whiteSpace: 'pre-line' }}>
+              {fmtSummary(selected.summary, selected.summary_en, 500)}
             </div>
             {detailBody ? (
               <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: 1.7, whiteSpace: 'pre-wrap',
