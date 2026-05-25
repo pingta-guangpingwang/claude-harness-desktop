@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef, useCallback, memo } from 'react'
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 
 interface ResourceItem {
   id: string
@@ -46,55 +46,6 @@ const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
   'agent-framework':{ bg: '#7c3aed22', text: '#c084fc' },
   'ai-assistant':   { bg: '#05966922', text: '#6ee7b7' },
 }
-
-const ResourceCard = memo(function ResourceCard(
-  { item, isSelected, onClick, lang, typeColors, typeLabels, repoLabels }: {
-    item: ResourceItem; isSelected: boolean; onClick: () => void; lang: 'zh' | 'en'
-    typeColors: Record<string, { bg: string; text: string }>
-    typeLabels: Record<string, string>
-    repoLabels: Record<string, string>
-  }
-) {
-  const scoreColor = (s: number) => s >= 8 ? '#34d399' : s >= 6 ? '#fbbf24' : '#ef4444'
-  return (
-    <div onClick={onClick} style={{
-      background: isSelected ? '#1e3a5f' : '#0f172a',
-      border: `1px solid ${isSelected ? '#2563eb' : '#1e293b'}`,
-      borderRadius: '8px', padding: '10px 12px', cursor: 'pointer',
-      transition: 'all 0.15s', contain: 'content',
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
-          <span style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {item.name}
-          </span>
-          <span style={{
-            fontSize: '10px', padding: '1px 6px', borderRadius: '4px',
-            background: typeColors[item.type]?.bg || '#d9770622',
-            color: typeColors[item.type]?.text || '#fbbf24',
-            flexShrink: 0,
-          }}>
-            {typeLabels[item.type] || item.type}
-          </span>
-        </div>
-        <span style={{ fontSize: '12px', fontWeight: 700, color: scoreColor(item.score), flexShrink: 0, marginLeft: '8px' }}>
-          ★ {item.score}
-        </span>
-      </div>
-      <div style={{ fontSize: '11px', color: '#cbd5e1', lineHeight: 1.4, marginBottom: '6px' }}>
-        {lang === 'en' && item.summary_en ? item.summary_en.slice(0, 120) : item.summary.slice(0, 120)}
-      </div>
-      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-        <span style={{ fontSize: '10px', color: '#64748b' }}>{repoLabels[item.repo] || item.repo}</span>
-        <span style={{ fontSize: '10px', color: '#475569' }}>·</span>
-        <span style={{ fontSize: '10px', color: '#64748b' }}>{item.category}</span>
-        {item.tech_stack?.slice(0, 3).map(t => (
-          <span key={t} style={{ fontSize: '10px', color: '#475569', background: '#1e293b', padding: '0 4px', borderRadius: '3px' }}>{t}</span>
-        ))}
-      </div>
-    </div>
-  )
-})
 
 export function ResourceMarket() {
   const [initialized, setInitialized] = useState(false)
@@ -180,10 +131,10 @@ export function ResourceMarket() {
     } catch { /* ignore */ }
   }
 
-  const loadResources = async (repo?: string) => {
+  const loadResources = async () => {
     setLoading(true)
     try {
-      const res = await window.electronAPI.resourceList(repo)
+      const res = await window.electronAPI.resourceList()
       if (res.success) {
         setResources(res.resources || [])
       }
@@ -191,10 +142,10 @@ export function ResourceMarket() {
     setLoading(false)
   }
 
-  // 首次初始化 + 切换仓库筛选时重新加载
+  // 首次初始化时加载全部资源，后续由 client-side filtered useMemo 处理筛选
   useEffect(() => {
-    if (initialized) loadResources(repoFilter === 'all' ? undefined : repoFilter)
-  }, [initialized, repoFilter])
+    if (initialized) loadResources()
+  }, [initialized])
 
   const loadLeaderboard = async () => {
     try {
@@ -539,7 +490,7 @@ export function ResourceMarket() {
             color: lang === 'en' ? '#60a5fa' : '#94a3b8', cursor: 'pointer',
             fontFamily: 'monospace',
           }}>{lang === 'zh' ? 'EN' : '中'}</button>
-        <button onClick={async () => { await loadRepoStatuses(); loadResources(repoFilter === 'all' ? undefined : repoFilter) }}
+        <button onClick={async () => { await loadRepoStatuses(); loadResources() }}
           title="刷新仓库状态"
           style={{
             fontSize: '10px', padding: '3px 8px', borderRadius: '4px',
@@ -712,17 +663,37 @@ export function ResourceMarket() {
             </div>
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', contain: 'layout style' }}>
-            {filtered.map(item => (
-              <ResourceCard key={item.id}
-                item={item}
-                isSelected={selected?.id === item.id}
-                onClick={() => handleViewDetail(item)}
-                lang={lang}
-                typeColors={TYPE_COLORS}
-                typeLabels={TYPE_LABELS}
-                repoLabels={REPO_LABELS}
-              />
-            ))}
+            {filtered.map(item => {
+              const isSel = selected?.id === item.id
+              const sc = scoreColor(item.score)
+              return (
+                <div key={item.id} onClick={() => handleViewDetail(item)} style={{
+                  background: isSel ? '#1e3a5f' : '#0f172a',
+                  border: `1px solid ${isSel ? '#2563eb' : '#1e293b'}`,
+                  borderRadius: '8px', padding: '10px 12px', cursor: 'pointer',
+                  transition: 'all 0.15s', contain: 'content',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
+                      <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: TYPE_COLORS[item.type]?.bg || '#d9770622', color: TYPE_COLORS[item.type]?.text || '#fbbf24', flexShrink: 0 }}>{TYPE_LABELS[item.type] || item.type}</span>
+                    </div>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: sc, flexShrink: 0, marginLeft: '8px' }}>★ {item.score}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#cbd5e1', lineHeight: 1.4, marginBottom: '6px' }}>
+                    {lang === 'en' && item.summary_en ? item.summary_en.slice(0, 120) : item.summary.slice(0, 120)}
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '10px', color: '#64748b' }}>{REPO_LABELS[item.repo] || item.repo}</span>
+                    <span style={{ fontSize: '10px', color: '#475569' }}>·</span>
+                    <span style={{ fontSize: '10px', color: '#64748b' }}>{item.category}</span>
+                    {item.tech_stack?.slice(0, 3).map(t => (
+                      <span key={t} style={{ fontSize: '10px', color: '#475569', background: '#1e293b', padding: '0 4px', borderRadius: '3px' }}>{t}</span>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
 
