@@ -131,6 +131,13 @@ class ResourceStore {
     return { synced, message: synced.length > 0 ? `已同步 ${synced.join(', ')}` : '所有仓库已是最新' }
   }
 
+  /** 确保 manifest 已加载到内存（即使 isInitialized 为 true 但内存可能为空） */
+  async ensureManifestsLoaded(): Promise<void> {
+    if (this.manifests.size === 0 && this.isInitialized()) {
+      await this.loadManifests()
+    }
+  }
+
   /** 加载所有仓库的 manifest 索引到内存 */
   async loadManifests(): Promise<boolean> {
     if (!this.isInitialized()) return false

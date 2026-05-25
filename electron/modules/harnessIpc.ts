@@ -314,6 +314,7 @@ export async function registerHarnessIpc(window: BrowserWindow) {
       if (!resourceStore.isInitialized()) {
         await resourceStore.loadManifests()
       }
+      await resourceStore.ensureManifestsLoaded()
       const resources = resourceStore.queryResources(params || {})
       return { success: true, resources }
     } catch (e) { return { success: false, error: String(e) } }
@@ -325,6 +326,8 @@ export async function registerHarnessIpc(window: BrowserWindow) {
       if (!resourceStore.isInitialized()) {
         await resourceStore.loadManifests()
       }
+      // 确保 manifest 已加载到内存（isInitialized 只检查文件存在，不检查内存状态）
+      await resourceStore.ensureManifestsLoaded()
       const resources = resourceStore.getAllResources(repo as any)
       return { success: true, resources }
     } catch (e) { return { success: false, error: String(e) } }
@@ -336,6 +339,7 @@ export async function registerHarnessIpc(window: BrowserWindow) {
       if (!resourceStore.isInitialized()) {
         await resourceStore.loadManifests()
       }
+      await resourceStore.ensureManifestsLoaded()
       const resource = await resourceStore.getResourceDetail(id)
       return { success: true, resource }
     } catch (e) { return { success: false, error: String(e) } }
