@@ -27,10 +27,16 @@ export const ResourceInjectorProcessor: ContextProcessor = (view, ctx) => {
 
     if (resources.length === 0) return view
 
+    const TYPE_CN: Record<string, string> = {
+      prompt: '提示词', template: '模板', case: '案例',
+      plugin: '插件', tool: '工具', skill: '技能',
+      'mcp-server': 'MCP服务', 'agent-framework': 'Agent框架', 'ai-assistant': 'AI助手',
+    }
+
     let ref = '\n## 参考资源仓库匹配结果\n'
     ref += '以下资源与当前开发任务相关，可发送给项目 AI 作为参考：\n\n'
     for (const r of resources) {
-      ref += `- **${r.name}** (${r.type === 'prompt' ? '提示词' : r.type === 'template' ? '模板' : r.type === 'case' ? '案例' : '工具'}, ⭐${r.score})\n`
+      ref += `- **${r.name}** (${TYPE_CN[r.type] || r.type}, ⭐${r.score})\n`
       ref += `  摘要: ${r.summary}\n`
       if (r.source_url) ref += `  地址: ${r.source_url}\n`
     }
@@ -101,7 +107,7 @@ export const searchResourcesTool: AgentTool = {
     type: 'object',
     properties: {
       query: { type: 'string', description: '检索关键词，如"数据看板 React 图表"或"登录页面设计"' },
-      resource_type: { type: 'string', description: '资源类型筛选: all(全部), prompt(提示词), template(模板), case(案例), plugin(插件), tool(工具), skill(技能)' },
+      resource_type: { type: 'string', description: '资源类型筛选: all(全部), prompt(提示词), template(模板), case(案例), plugin(插件), tool(工具), skill(技能), mcp-server(MCP服务), agent-framework(Agent框架), ai-assistant(AI助手)' },
       max_results: { type: 'number', description: '最大返回数，默认 5，最大 10' },
     },
   },
@@ -137,7 +143,7 @@ export const addResourceTool: AgentTool = {
     type: 'object',
     properties: {
       repo: { type: 'string', description: '目标仓库: DeepBluePrompt(提示词), DeepBlueCase(模板案例), DeepBlueKit(组件工具)' },
-      resource_type: { type: 'string', description: '资源类型: prompt, template, case, plugin, tool, skill' },
+      resource_type: { type: 'string', description: '资源类型: prompt, template, case, plugin, tool, skill, mcp-server, agent-framework, ai-assistant' },
       name: { type: 'string', description: '资源名称' },
       content: { type: 'string', description: '资源内容：提示词正文、项目介绍、工具描述等' },
       source_url: { type: 'string', description: '来源地址（GitHub/npm/其他）' },
@@ -227,7 +233,7 @@ export const suggestResourceTool: AgentTool = {
     type: 'object',
     properties: {
       name: { type: 'string', description: '资源名称，简洁明了' },
-      resource_type: { type: 'string', description: '资源类型: prompt, template, case, plugin, tool, skill' },
+      resource_type: { type: 'string', description: '资源类型: prompt, template, case, plugin, tool, skill, mcp-server, agent-framework, ai-assistant' },
       target_repo: { type: 'string', description: '目标仓库: DeepBluePrompt(提示词), DeepBlueCase(模板案例), DeepBlueKit(组件工具)' },
       category: { type: 'string', description: '分类标签，如 react, database, devops 等' },
       tech_stack: { type: 'array', items: { type: 'string' }, description: '技术栈列表' },

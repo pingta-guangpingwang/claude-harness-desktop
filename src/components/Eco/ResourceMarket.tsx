@@ -30,12 +30,21 @@ const REPO_LABELS: Record<string, string> = {
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  prompt: '提示词',
-  template: '模板',
-  case: '案例',
-  plugin: '插件',
-  tool: '工具',
-  skill: '技能',
+  prompt: '提示词', template: '模板', case: '案例',
+  plugin: '插件', tool: '工具', skill: '技能',
+  'mcp-server': 'MCP服务', 'agent-framework': 'Agent框架', 'ai-assistant': 'AI助手',
+}
+
+const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
+  prompt:           { bg: '#7c3aed22', text: '#a78bfa' },
+  template:         { bg: '#2563eb22', text: '#60a5fa' },
+  case:             { bg: '#05966922', text: '#34d399' },
+  plugin:           { bg: '#d9770622', text: '#fbbf24' },
+  tool:             { bg: '#0891b222', text: '#22d3ee' },
+  skill:            { bg: '#db277722', text: '#f472b6' },
+  'mcp-server':     { bg: '#ea580c22', text: '#fb923c' },
+  'agent-framework':{ bg: '#7c3aed22', text: '#c084fc' },
+  'ai-assistant':   { bg: '#05966922', text: '#6ee7b7' },
 }
 
 export function ResourceMarket() {
@@ -419,6 +428,9 @@ export function ResourceMarket() {
           <option value="plugin">插件</option>
           <option value="tool">工具</option>
           <option value="skill">技能</option>
+          <option value="mcp-server">MCP服务</option>
+          <option value="agent-framework">Agent框架</option>
+          <option value="ai-assistant">AI助手</option>
         </select>
         <button onClick={handleSearch} style={{
           padding: '6px 14px', fontSize: '12px', background: '#06b6d4', color: '#fff',
@@ -655,8 +667,8 @@ export function ResourceMarket() {
                     </span>
                     <span style={{
                       fontSize: '10px', padding: '1px 6px', borderRadius: '4px',
-                      background: item.type === 'prompt' ? '#7c3aed22' : item.type === 'template' ? '#2563eb22' : item.type === 'case' ? '#05966922' : '#d9770622',
-                      color: item.type === 'prompt' ? '#a78bfa' : item.type === 'template' ? '#60a5fa' : item.type === 'case' ? '#34d399' : '#fbbf24',
+                      background: TYPE_COLORS[item.type]?.bg || '#d9770622',
+                      color: TYPE_COLORS[item.type]?.text || '#fbbf24',
                       flexShrink: 0,
                     }}>
                       {TYPE_LABELS[item.type] || item.type}

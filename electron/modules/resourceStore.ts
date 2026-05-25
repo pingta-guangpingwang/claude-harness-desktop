@@ -729,6 +729,10 @@ class ResourceStore {
     if (repo === 'DeepBlueKit') {
       if (type === 'plugin') return 'plugins'
       if (type === 'tool') return 'tools'
+      if (type === 'skill') return 'skills'
+      if (type === 'mcp-server') return 'mcp-servers'
+      if (type === 'agent-framework') return 'agent-frameworks'
+      if (type === 'ai-assistant') return 'ai-assistants'
       return 'skills'
     }
     return 'other'
