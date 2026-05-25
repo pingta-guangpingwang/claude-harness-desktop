@@ -191,10 +191,10 @@ export function ResourceMarket() {
     setLoading(false)
   }
 
-  // 切换仓库筛选时重新加载
+  // 首次初始化 + 切换仓库筛选时重新加载
   useEffect(() => {
     if (initialized) loadResources(repoFilter === 'all' ? undefined : repoFilter)
-  }, [repoFilter])
+  }, [initialized, repoFilter])
 
   const loadLeaderboard = async () => {
     try {
