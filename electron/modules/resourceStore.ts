@@ -109,6 +109,28 @@ class ResourceStore {
     return false
   }
 
+  /** 自动同步所有已克隆仓库到最新，然后重载 manifest */
+  async autoSyncAll(): Promise<{ synced: RepoName[]; message: string }> {
+    const synced: RepoName[] = []
+    for (const repo of REPO_NAMES) {
+      const repoPath = getRepoPath(repo)
+      if (!fs.existsSync(path.join(repoPath, '.git'))) continue
+      try {
+        const branch = await this.git(repo, 'rev-parse --abbrev-ref HEAD')
+        const fetchR = await this.gitSilent(repo, `fetch origin ${branch}`, 15000)
+        if (!fetchR.ok) continue
+        const before = await this.git(repo, 'rev-parse HEAD')
+        const after = await this.git(repo, `rev-parse origin/${branch}`)
+        if (before !== after) {
+          const pullR = await this.gitSilent(repo, `pull --ff-only origin ${branch}`, 30000)
+          if (pullR.ok) synced.push(repo)
+        }
+      } catch { /* 静默跳过 */ }
+    }
+    if (synced.length > 0) await this.loadManifests()
+    return { synced, message: synced.length > 0 ? `已同步 ${synced.join(', ')}` : '所有仓库已是最新' }
+  }
+
   /** 加载所有仓库的 manifest 索引到内存 */
   async loadManifests(): Promise<boolean> {
     if (!this.isInitialized()) return false

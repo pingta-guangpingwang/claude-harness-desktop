@@ -31,6 +31,7 @@ export interface ElectronAPI {
   resourceContributePush: (repo: string, branchName: string) => Promise<{ success: boolean; message: string }>
   resourceContributePR: (repo: string, branchName: string, title: string, body: string) => Promise<{ success: boolean; message: string; url?: string }>
   resourceClone: (repo: string, remoteUrl?: string) => Promise<{ success: boolean; message: string }>
+  resourceAutoSync: () => Promise<{ synced: string[]; message: string }>
   // Pending Resource Review
   pendingList: () => Promise<{ success: boolean; items: Array<{
     id: string; name: string; resourceType: string; targetRepo: string

@@ -106,7 +106,19 @@ export function ResourceMarket() {
         if (res.initialized) {
           loadResources()
           loadLeaderboard()
+          // 静默自动同步最新数据
+          autoSync()
         }
+      }
+    } catch { /* ignore */ }
+  }
+
+  const autoSync = async () => {
+    try {
+      const r = await window.electronAPI.resourceAutoSync()
+      if (r.synced.length > 0) {
+        loadResources()
+        loadLeaderboard()
       }
     } catch { /* ignore */ }
   }

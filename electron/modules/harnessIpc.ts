@@ -433,6 +433,13 @@ export async function registerHarnessIpc(window: BrowserWindow) {
     } catch (e) { return { success: false, message: String(e) } }
   })
 
+  ipcMain.handle('resource:auto-sync', async () => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      return await resourceStore.autoSyncAll()
+    } catch (e) { return { synced: [], message: String(e) } }
+  })
+
   // ---- 待审核资源管理 ----
   ipcMain.handle('pending:list', async () => {
     try {

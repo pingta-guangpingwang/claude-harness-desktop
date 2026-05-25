@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resourceContributePush: (repo: string, branchName: string) => ipcRenderer.invoke('resource:contribute-push', repo, branchName),
   resourceContributePR: (repo: string, branchName: string, title: string, body: string) => ipcRenderer.invoke('resource:contribute-pr', repo, branchName, title, body),
   resourceClone: (repo: string, remoteUrl?: string) => ipcRenderer.invoke('resource:clone', repo, remoteUrl),
+  resourceAutoSync: () => ipcRenderer.invoke('resource:auto-sync'),
 
   // ============ Pending Resource Review ============
   pendingList: () => ipcRenderer.invoke('pending:list'),
