@@ -47,6 +47,10 @@ const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
   'ai-assistant':   { bg: '#05966922', text: '#6ee7b7' },
 }
 
+// 模块级缓存：避免组件卸载/重新挂载（切 Tab）时重复执行 Git 操作
+let _autoSyncDone = false
+let _repoStatusesCache: Record<string, any> | null = null
+
 export function ResourceMarket() {
   const [initialized, setInitialized] = useState(false)
   const [resources, setResources] = useState<ResourceItem[]>([])
@@ -122,13 +126,15 @@ export function ResourceMarket() {
         setInitialized(res.initialized)
         if (res.initialized) {
           loadLeaderboard()
-          autoSync()
+          // 首次打开时后台静默同步，后续切 Tab 不再重复拉取
+          if (!_autoSyncDone) autoSync()
         }
       }
     } catch { /* ignore */ }
   }
 
   const autoSync = async () => {
+    _autoSyncDone = true
     try {
       const r = await window.electronAPI.resourceAutoSync()
       if (r.synced.length > 0) {
@@ -199,7 +205,12 @@ export function ResourceMarket() {
     } catch { /* ignore */ }
   }, [selected?.id])
 
-  const loadRepoStatuses = async () => {
+  const loadRepoStatuses = async (force = false) => {
+    // 已缓存且非强制刷新 → 直接用缓存，避免每次切 Tab 都 git fetch
+    if (!force && _repoStatusesCache) {
+      setRepoStatuses(_repoStatusesCache)
+      return
+    }
     const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit']
     const statuses: Record<string, any> = {}
     for (const repo of repos) {
@@ -210,6 +221,7 @@ export function ResourceMarket() {
         }
       } catch { /* ignore */ }
     }
+    _repoStatusesCache = statuses
     setRepoStatuses(statuses)
   }
 
@@ -220,7 +232,7 @@ export function ResourceMarket() {
       const res = await window.electronAPI.resourceSyncPull(repo)
       setSyncMessage(res.message)
       if (res.pulled) loadResources()
-      await loadRepoStatuses()
+      await loadRepoStatuses(true)
     } catch { /* ignore */ }
     setSyncing(null)
   }
@@ -234,7 +246,7 @@ export function ResourceMarket() {
       setSyncMessage(res.message)
       if (res.success) {
         await loadStatus()
-        await loadRepoStatuses()
+        await loadRepoStatuses(true)
         loadResources()
       }
     } catch { /* ignore */ }
@@ -498,7 +510,7 @@ export function ResourceMarket() {
             color: lang !== 'zh' ? '#60a5fa' : '#94a3b8', cursor: 'pointer',
             fontFamily: 'monospace',
           }}>{langLabel(lang)}</button>
-        <button onClick={async () => { await loadRepoStatuses(); loadResources() }}
+        <button onClick={async () => { await loadRepoStatuses(true); loadResources() }}
           title="刷新仓库状态"
           style={{
             fontSize: '10px', padding: '3px 8px', borderRadius: '4px',
