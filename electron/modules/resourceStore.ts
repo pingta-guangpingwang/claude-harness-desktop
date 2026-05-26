@@ -477,6 +477,38 @@ class ResourceStore {
     }
   }
 
+  /** 强制拉取最新代码 — 失败立即中止，不静默吞错误 */
+  async forcePullOrAbort(repo: RepoName): Promise<{ success: boolean; message: string }> {
+    if (!await this.isGitRepo(repo)) {
+      return { success: false, message: '不是 Git 仓库' }
+    }
+
+    const branch = await this.git(repo, 'rev-parse --abbrev-ref HEAD').catch(() => 'main')
+
+    const fetchR = await this.gitSilent(repo, `fetch origin ${branch}`, 30000)
+    if (!fetchR.ok) {
+      return { success: false, message: `网络获取失败: ${fetchR.output}。请检查网络连接后重试。` }
+    }
+
+    try {
+      const behindCount = await this.git(repo, `rev-list --count HEAD..origin/${branch}`)
+      if (parseInt(behindCount, 10) <= 0) {
+        return { success: true, message: '已是最新' }
+      }
+    } catch { /* 如果 rev-list 失败则继续 pull */ }
+
+    const pullR = await this.gitSilent(repo, `pull --ff-only origin ${branch}`, 30000)
+    if (!pullR.ok) {
+      if (pullR.output.toLowerCase().includes('conflict') || pullR.output.includes('CONFLICT')) {
+        return { success: false, message: `拉取冲突: 远程仓库有冲突，请手动解决后再提交。\n${pullR.output.slice(0, 200)}` }
+      }
+      return { success: false, message: `拉取失败: ${pullR.output}。提交已中止，请检查后重试。` }
+    }
+
+    await this.loadManifests()
+    return { success: true, message: '已拉取最新代码' }
+  }
+
   // ============ 贡献流程 ============
 
   /** 获取本地变更文件列表（git status） */
@@ -495,6 +527,98 @@ class ResourceStore {
     } catch {
       return []
     }
+  }
+
+  /** 分类变更文件：仅新增(??/A/AM) vs 被阻止(M/D/R等) */
+  async getNewFilesOnly(repo: RepoName): Promise<{
+    newFiles: Array<{ path: string; status: string }>
+    blockedFiles: Array<{ path: string; status: string }>
+  }> {
+    const allChanges = await this.getLocalChanges(repo)
+    const newFiles: Array<{ path: string; status: string }> = []
+    const blockedFiles: Array<{ path: string; status: string }> = []
+    const ALLOWED = new Set(['??', 'A', 'AM'])
+    const BLOCKED = new Set(['M', 'MM', 'D', 'R', 'RM', 'RD', 'C', 'U', 'UU', 'UA', 'AU', 'DD', 'AA'])
+
+    for (const change of allChanges) {
+      if (ALLOWED.has(change.status)) {
+        newFiles.push(change)
+      } else if (BLOCKED.has(change.status)) {
+        blockedFiles.push(change)
+      } else {
+        blockedFiles.push(change) // 未知状态一律阻止
+      }
+    }
+    return { newFiles, blockedFiles }
+  }
+
+  /** 校验单个资源文件的 YAML frontmatter */
+  async validateNewFileYaml(repo: RepoName, filePath: string): Promise<{ valid: boolean; errors: string[] }> {
+    const errors: string[] = []
+    const repoPath = getRepoPath(repo)
+    const fullPath = path.join(repoPath, filePath)
+
+    try {
+      const raw = await fs.readFile(fullPath, 'utf-8')
+      const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+      if (!fmMatch) {
+        return { valid: false, errors: [`文件 ${filePath} 缺少 YAML frontmatter (--- 块)`] }
+      }
+
+      let fm: Record<string, any>
+      try {
+        fm = (yaml.load(fmMatch[1]) as Record<string, any>) || {}
+      } catch (e: any) {
+        return { valid: false, errors: [`文件 ${filePath} 的 YAML frontmatter 解析失败: ${e.message}`] }
+      }
+
+      const REQUIRED_FIELDS = ['id', 'name', 'type', 'category', 'summary']
+      for (const field of REQUIRED_FIELDS) {
+        if (!fm[field] || (typeof fm[field] === 'string' && fm[field].trim() === '')) {
+          errors.push(`文件 ${filePath} 缺少必填字段: ${field}`)
+        }
+      }
+
+      const VALID_TYPES = ['prompt', 'template', 'case', 'plugin', 'tool', 'skill', 'mcp-server', 'agent-framework', 'ai-assistant']
+      if (fm.type && !VALID_TYPES.includes(fm.type)) {
+        errors.push(`文件 ${filePath} 的 type 字段值 "${fm.type}" 不在有效类型列表中`)
+      }
+
+      return { valid: errors.length === 0, errors }
+    } catch (e: any) {
+      return { valid: false, errors: [`无法读取文件 ${filePath}: ${e.message}`] }
+    }
+  }
+
+  /** 提交范围验证：仅新增文件 + YAML 必填字段 */
+  async validateCommitScope(repo: RepoName): Promise<{
+    valid: boolean
+    errors: string[]
+    newFiles: Array<{ path: string; status: string }>
+    blockedFiles: Array<{ path: string; status: string }>
+  }> {
+    const errors: string[] = []
+    const { newFiles, blockedFiles } = await this.getNewFilesOnly(repo)
+
+    if (newFiles.length === 0 && blockedFiles.length === 0) {
+      return { valid: true, errors: [], newFiles: [], blockedFiles: [] }
+    }
+
+    if (blockedFiles.length > 0) {
+      const fileList = blockedFiles.map(f => `  [${f.status}] ${f.path}`).join('\n')
+      errors.push(
+        `发现 ${blockedFiles.length} 个不允许提交的文件（仅允许新增文件，不支持修改或删除已有文件）:\n${fileList}`
+      )
+    }
+
+    for (const file of newFiles) {
+      const yamlResult = await this.validateNewFileYaml(repo, file.path)
+      if (!yamlResult.valid) {
+        errors.push(...yamlResult.errors)
+      }
+    }
+
+    return { valid: errors.length === 0, errors, newFiles, blockedFiles }
   }
 
   /** 创建贡献分支 */
@@ -520,26 +644,38 @@ class ResourceStore {
     return { success: true, message: `已创建分支: ${branchName}` }
   }
 
-  /** 提交变更 */
-  async commitChanges(repo: RepoName, message: string): Promise<{ success: boolean; message: string }> {
+  /** 提交变更 — 默认仅提交新增文件，需传入 files 或用 getNewFilesOnly 自动过滤 */
+  async commitChanges(repo: RepoName, message: string, files?: string[]): Promise<{ success: boolean; message: string }> {
     if (!await this.isGitRepo(repo)) {
       return { success: false, message: '不是 Git 仓库' }
     }
 
-    const changes = await this.getLocalChanges(repo)
-    if (changes.length === 0) {
+    let filesToAdd: string[]
+    if (files && files.length > 0) {
+      filesToAdd = files
+    } else {
+      const { newFiles, blockedFiles } = await this.getNewFilesOnly(repo)
+      if (blockedFiles.length > 0) {
+        const blockedList = blockedFiles.map(f => `  [${f.status}] ${f.path}`).join('\n')
+        return { success: false, message: `提交范围检查失败: 存在 ${blockedFiles.length} 个不允许的文件（修改/删除）:\n${blockedList}\n\n仅支持提交新增文件。请先处理这些文件后再提交。` }
+      }
+      filesToAdd = newFiles.map(f => f.path)
+    }
+
+    if (filesToAdd.length === 0) {
       return { success: false, message: '没有需要提交的变更' }
     }
 
-    const addR = await this.gitSilent(repo, 'add --all')
-    if (!addR.ok) return { success: false, message: `Git add 失败: ${addR.output}` }
+    for (const file of filesToAdd) {
+      const addR = await this.gitSilent(repo, `add "${file}"`)
+      if (!addR.ok) return { success: false, message: `Git add 失败 (${file}): ${addR.output}` }
+    }
 
-    // 转义 commit message 中的引号
     const escaped = message.replace(/"/g, '\\"')
     const commitR = await this.gitSilent(repo, `commit -m "${escaped}"`)
     if (!commitR.ok) return { success: false, message: `提交失败: ${commitR.output}` }
 
-    return { success: true, message: '提交成功' }
+    return { success: true, message: `提交成功 (${filesToAdd.length} 个文件)` }
   }
 
   /** 推送分支 */
@@ -563,6 +699,47 @@ class ResourceStore {
     }
 
     return { success: true, message: '推送成功' }
+  }
+
+  /** 安全推送：遇到 non-fast-forward 拒绝则 pull --rebase 后重试一次 */
+  async safePushBranch(repo: RepoName, branchName: string): Promise<{ success: boolean; message: string; retried: boolean }> {
+    if (!await this.isGitRepo(repo)) {
+      return { success: false, message: '不是 Git 仓库', retried: false }
+    }
+
+    if (!await this.isGitHubAuthenticated()) {
+      return { success: false, message: 'GitHub 未登录，请在终端执行: gh auth login', retried: false }
+    }
+
+    let r = await this.gitSilent(repo, `push -u origin ${branchName}`, 30000)
+    if (r.ok) {
+      return { success: true, message: '推送成功', retried: false }
+    }
+
+    const outputLower = r.output.toLowerCase()
+    const isRejected = outputLower.includes('rejected') ||
+      outputLower.includes('non-fast-forward') ||
+      outputLower.includes('fetch first') ||
+      outputLower.includes('updates were rejected')
+
+    if (isRejected) {
+      const pullR = await this.gitSilent(repo, `pull --rebase origin ${branchName}`, 30000)
+      if (!pullR.ok) {
+        return { success: false, message: `推送被拒绝，尝试自动合并失败: ${pullR.output}。请手动处理冲突后重试。`, retried: true }
+      }
+
+      r = await this.gitSilent(repo, `push -u origin ${branchName}`, 30000)
+      if (r.ok) {
+        return { success: true, message: '推送成功 (已自动合并远程更新)', retried: true }
+      }
+      return { success: false, message: `推送失败 (重试后仍失败): ${r.output}`, retried: true }
+    }
+
+    if (outputLower.includes('permission') || outputLower.includes('authentication') || outputLower.includes('denied')) {
+      return { success: false, message: 'GitHub 认证失败，请在终端执行: gh auth login', retried: false }
+    }
+
+    return { success: false, message: `推送失败: ${r.output}`, retried: false }
   }
 
   /** 检查 gh CLI 是否可用 */

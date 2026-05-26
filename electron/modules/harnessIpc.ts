@@ -697,31 +697,62 @@ export async function registerHarnessIpc(window: BrowserWindow) {
       const { resourceStore } = await import('../modules/resourceStore.js')
       const { userContributionStore } = await import('../modules/userContributionStore.js')
       const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit']
-      const results = []
+      const results: Array<{ repo: string; success: boolean; message: string; step?: string }> = []
 
       for (const repo of repos) {
+        // Step 1: 检查是否有任何变更
         const changes = await resourceStore.getLocalChanges(repo)
         if (changes.length === 0) {
           results.push({ repo, success: true, message: '无变更，跳过' })
           continue
         }
 
-        try {
-          const check = await resourceStore.checkForUpdates(repo)
-          if (check.hasUpdates) {
-            await resourceStore.syncRepo(repo)
-          }
-        } catch (_) { /* ignore */ }
-
-        const commitResult = await resourceStore.commitChanges(repo, message)
-        if (!commitResult.success) {
-          results.push({ repo, success: false, message: commitResult.message })
+        // Step 2: 闸门 1 — 范围管控 + YAML 校验
+        const scopeCheck = await resourceStore.validateCommitScope(repo)
+        if (!scopeCheck.valid) {
+          results.push({
+            repo,
+            success: false,
+            message: `提交安全检查未通过:\n${scopeCheck.errors.join('\n')}`,
+            step: 'scope-check',
+          })
+          continue
+        }
+        if (scopeCheck.newFiles.length === 0) {
+          results.push({ repo, success: true, message: '仅有被阻止的文件，已跳过' })
           continue
         }
 
+        // Step 3: 闸门 2 — 强制拉取（失败立即中止）
+        let pullResult: { success: boolean; message: string }
+        try {
+          pullResult = await resourceStore.forcePullOrAbort(repo)
+        } catch (e: any) {
+          results.push({
+            repo,
+            success: false,
+            message: `拉取异常 (提交已中止): ${e.message || String(e)}。请检查网络连接和仓库状态后重试。`,
+            step: 'pull',
+          })
+          continue
+        }
+        if (!pullResult.success) {
+          results.push({ repo, success: false, message: pullResult.message, step: 'pull' })
+          continue
+        }
+
+        // Step 4: 精确提交（仅新增文件）
+        const newFilePaths = scopeCheck.newFiles.map(f => f.path)
+        const commitResult = await resourceStore.commitChanges(repo, message, newFilePaths)
+        if (!commitResult.success) {
+          results.push({ repo, success: false, message: commitResult.message, step: 'commit' })
+          continue
+        }
+
+        // Step 5: 闸门 3 — 安全推送（冲突自动重试）
         const status = await resourceStore.getRepoStatus(repo).catch(() => null)
         const branch = status?.branch || 'main'
-        const pushResult = await resourceStore.pushBranch(repo, branch)
+        const pushResult = await resourceStore.safePushBranch(repo, branch)
         if (pushResult.success) {
           const contribs = userContributionStore.contributions.filter(c => c.repo === repo && !c.committed)
           const ids = contribs.map(c => c.id)
@@ -729,14 +760,15 @@ export async function registerHarnessIpc(window: BrowserWindow) {
             userContributionStore.markCommitted(ids)
             userContributionStore.markPushed(ids)
           }
-          results.push({ repo, success: true, message: '已提交并推送' })
+          const retryNote = pushResult.retried ? ' (自动合并远程更新后推送)' : ''
+          results.push({ repo, success: true, message: `已提交 ${newFilePaths.length} 个文件并推送${retryNote}` })
         } else {
           const contribs = userContributionStore.contributions.filter(c => c.repo === repo && !c.committed)
           const ids = contribs.map(c => c.id)
           if (ids.length > 0) {
             userContributionStore.markCommitted(ids)
           }
-          results.push({ repo, success: false, message: '已提交但推送失败: ' + pushResult.message })
+          results.push({ repo, success: false, message: '已提交但推送失败: ' + pushResult.message, step: 'push' })
         }
       }
 

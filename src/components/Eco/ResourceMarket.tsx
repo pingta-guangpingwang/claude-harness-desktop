@@ -103,7 +103,7 @@ export function ResourceMarket() {
   const [showCommit, setShowCommit] = useState(false)
   const [commitCheck, setCommitCheck] = useState<Record<string, { hasRemote: boolean; behind: number; localChanges: Array<{ path: string; status: string }>; uncommittedIds: string[] }> | null>(null)
   const [committing, setCommitting] = useState(false)
-  const [commitResult, setCommitResult] = useState<Array<{ repo: string; success: boolean; message: string }> | null>(null)
+  const [commitResult, setCommitResult] = useState<Array<{ repo: string; success: boolean; message: string; step?: string }> | null>(null)
   const [autoSyncMsg, setAutoSyncMsg] = useState(_autoSyncMsg)
   const [lang, setLang] = useState<'zh' | 'en' | 'bilingual'>(_lang)
   const nextLang = (l: 'zh' | 'en' | 'bilingual') => l === 'zh' ? 'en' : l === 'en' ? 'bilingual' : 'zh'
@@ -842,16 +842,45 @@ export function ResourceMarket() {
                     {st.localChanges.length > 10 && <span style={{ fontSize: '9px', color: '#64748b' }}>+{st.localChanges.length - 10} 更多</span>}
                   </div>
                 )}
+                {st.localChanges.some(f => f.status === 'M' || f.status === 'D' || f.status === 'R') && (
+                  <div style={{ fontSize: '9px', color: '#f59e0b', marginTop: '4px' }}>
+                    ⚠ 检测到修改/删除文件，仅新增文件会被提交
+                  </div>
+                )}
               </div>
             )
           })}
           {commitResult && (
-            <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-              {commitResult.map(r => (
-                <div key={r.repo} style={{ fontSize: '10px', color: r.success ? '#34d399' : '#ef4444' }}>
-                  {r.success ? '✓' : '✕'} {r.repo.replace('DeepBlue', '')}: {r.message}
-                </div>
-              ))}
+            <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {commitResult.map(r => {
+                const stepLabel = r.step === 'scope-check' ? '安全检查' :
+                  r.step === 'pull' ? '拉取' :
+                  r.step === 'commit' ? '提交' :
+                  r.step === 'push' ? '推送' : ''
+                return (
+                  <div key={r.repo} style={{
+                    fontSize: '11px',
+                    color: r.success ? '#34d399' : '#ef4444',
+                    background: r.success ? '#05966911' : '#ef444411',
+                    padding: '6px 8px',
+                    borderRadius: '4px',
+                    border: `1px solid ${r.success ? '#05966933' : '#ef444433'}`,
+                    whiteSpace: 'pre-wrap',
+                    lineHeight: 1.5,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                      <span style={{ flexShrink: 0 }}>{r.success ? '✓' : '✕'}</span>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ fontWeight: 600 }}>
+                          {r.repo.replace('DeepBlue', '')}
+                          {r.step ? ` [${stepLabel}]` : ''}:
+                        </span>
+                        <span> {r.message}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
           <button onClick={handleCommitAll}

@@ -49,7 +49,7 @@ export interface ElectronAPI {
   // User Contributions
   contributionList: () => Promise<{ success: boolean; contributions: Array<{ id: string; name: string; repo: string; type: string; addedAt: string; committed: boolean; committedAt?: string; pushed: boolean; pushedAt?: string }>; error?: string }>
   contributionCheckStatus: () => Promise<{ success: boolean; repoStatuses: Record<string, { hasRemote: boolean; behind: number; localChanges: Array<{ path: string; status: string }>; uncommittedIds: string[] }>; error?: string }>
-  contributionCommitAll: (message: string) => Promise<{ success: boolean; results: Array<{ repo: string; success: boolean; message: string }>; error?: string }>
+  contributionCommitAll: (message: string) => Promise<{ success: boolean; results: Array<{ repo: string; success: boolean; message: string; step?: string }>; error?: string }>
   // Horse Farm
   saveHorseFarmData: (projectPath: string, data: { requirements?: string; summary?: string }) => Promise<{ success: boolean; message?: string }>
   loadHorseFarmData: (projectPath: string) => Promise<{ success: boolean; exists?: boolean; requirements?: string; summary?: string; mindmapPath?: string; kbPath?: string }>

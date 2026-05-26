@@ -123,8 +123,42 @@ declare class ResourceStore {
         success: boolean;
         message: string;
     }>;
-    /** 提交变更 */
-    commitChanges(repo: RepoName, message: string): Promise<{
+    /** 强制拉取最新代码，失败则中止（不静默吞错误） */
+    forcePullOrAbort(repo: RepoName): Promise<{
+        success: boolean;
+        message: string;
+    }>;
+    /** 获取仅新增文件的列表（排除修改/删除/重命名） */
+    getNewFilesOnly(repo: RepoName): Promise<{
+        newFiles: Array<{
+            path: string;
+            status: string;
+        }>;
+        blockedFiles: Array<{
+            path: string;
+            status: string;
+        }>;
+    }>;
+    /** 验证单个文件的 YAML frontmatter 必填字段 */
+    validateNewFileYaml(repo: RepoName, filePath: string): Promise<{
+        valid: boolean;
+        errors: string[];
+    }>;
+    /** 提交范围验证：检查仅新增文件 + YAML 必填字段 */
+    validateCommitScope(repo: RepoName): Promise<{
+        valid: boolean;
+        errors: string[];
+        newFiles: Array<{
+            path: string;
+            status: string;
+        }>;
+        blockedFiles: Array<{
+            path: string;
+            status: string;
+        }>;
+    }>;
+    /** 提交变更（支持指定文件范围，不指定则仅提交新增文件） */
+    commitChanges(repo: RepoName, message: string, files?: string[]): Promise<{
         success: boolean;
         message: string;
     }>;
@@ -132,6 +166,12 @@ declare class ResourceStore {
     pushBranch(repo: RepoName, branchName: string): Promise<{
         success: boolean;
         message: string;
+    }>;
+    /** 安全推送：遇到 non-fast-forward 则 pull --rebase 后重试一次 */
+    safePushBranch(repo: RepoName, branchName: string): Promise<{
+        success: boolean;
+        message: string;
+        retried: boolean;
     }>;
     /** 检查 gh CLI 是否可用 */
     isGhAvailable(): Promise<boolean>;
