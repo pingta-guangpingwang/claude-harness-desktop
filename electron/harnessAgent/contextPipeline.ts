@@ -7,6 +7,7 @@ import { type MemoryManager } from './memoryStore.js'
 import { searchKnowledge } from './knowledge.js'
 import type { AgentContext } from './types.js'
 import { getAllTools } from './toolRegistry.js'
+import { ResourceInjectorProcessor } from './resourceRetriever.js'
 
 // ---- Context View（管道中各 Processor 之间传递的中间对象） ----
 
@@ -253,6 +254,15 @@ ${pluginSection}${knowledgeSection}
 | API 401/403 错误 | diagnose_project → search_knowledge → write_file 修 settings.json → stop → wake |
 | 多个项目同时静默 | 大概率阻塞对话框，read_project_chat 查看 📡 终端 |
 | 死循环输出 | write_to_pty → Ctrl+C (\\x03) |
+| 终端中文乱码/GBK 乱码 | Windows CMD 默认 GBK 编码，中文输出会乱码。告知项目 AI：先执行 chcp 65001 切换到 UTF-8，再运行命令 |
+
+## Windows 中文编码纪律
+- **Windows CMD 默认编码是 GBK (chcp 936)**，不是 UTF-8。项目 AI 运行 npm/dev 服务器等命令时，中文日志/报错会显示为乱码
+- **给项目 AI 派任务时，如果涉及启动服务/运行脚本/查看日志等会产生中文输出的操作，必须在 task 中加上编码指令**：
+  - 示例 task: "请先执行 chcp 65001 切换到 UTF-8 编码，然后运行 npm run dev 启动开发服务器"
+  - 示例 task: "chcp 65001 && npm run dev，启动后观察输出"
+- **生成的启动 .bat 已自带 chcp 65001**，但如果让项目 AI 直接在终端执行命令（不通过 .bat），必须提醒它先切换编码
+- **查看终端输出时如果看到乱码** → 先让项目 AI 执行 chcp 65001，再重新运行命令
 
 用中文，简洁有力。`
 
@@ -271,6 +281,7 @@ export const DEFAULT_PIPELINE: ContextProcessor[] = [
   KnowledgeInjectorProcessor,
   CachePrefixerProcessor,
   DynamicInjectorProcessor,
+  ResourceInjectorProcessor,
 ]
 
 export async function runPipeline(

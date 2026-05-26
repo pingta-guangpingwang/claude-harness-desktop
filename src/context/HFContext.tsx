@@ -6,6 +6,17 @@ export interface Project {
   repoPath: string
   status: string
   source: 'dbht-root' | 'individual'
+  rating?: number
+  order?: number
+  borderColor?: string
+  notes?: string
+}
+
+export interface ProjectMetadata {
+  rating?: number
+  order?: number
+  borderColor?: string
+  notes?: string
 }
 
 export interface HFState {

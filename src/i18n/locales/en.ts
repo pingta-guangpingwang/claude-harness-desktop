@@ -36,6 +36,16 @@ const en = {
     addIndividual: 'Add Individual Project',
     sourceDBHT: 'DBHT',
     sourceIndividual: 'Individual',
+    sortManual: 'Manual Sort',
+    sortRating: 'Sort by Rating',
+    notesPlaceholder: 'Double-click to add notes...',
+    notesTitle: 'Project Notes',
+    notesHint: 'Notes are auto-saved. Markdown supported.',
+    notesSave: 'Save',
+    notesCancel: 'Cancel',
+    globalSettings: 'Global Settings',
+    borderColor: 'Border Color',
+    defaultColor: 'Default',
   },
 
   titleBar: {
@@ -476,6 +486,7 @@ const en = {
 
   eco: {
     resourceHub: 'Resource Hub',
+    deepBlueWorkshop: 'DeepBlue Workshop',
     configMigrator: 'Config Migrator',
     searchResources: 'Search resources...',
     allTypes: 'All Types',

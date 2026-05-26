@@ -12,7 +12,7 @@ export class AutoStartManager {
     app.setLoginItemSettings({
       openAtLogin: true,
       path: process.execPath,
-      args: [],
+      args: app.isPackaged ? [] : [app.getAppPath()],
     })
   }
 
@@ -36,7 +36,11 @@ export class AutoStartManager {
 
   /** 设置开机自启状态 */
   setEnabled(enabled: boolean): void {
-    app.setLoginItemSettings({ openAtLogin: enabled })
+    if (enabled) {
+      this.enable()
+    } else {
+      this.disable()
+    }
   }
 }
 

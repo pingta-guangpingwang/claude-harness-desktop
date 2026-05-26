@@ -38,6 +38,16 @@ const zh: Translations = {
     addIndividual: '添加单独项目',
     sourceDBHT: 'DBHT',
     sourceIndividual: '单独项目',
+    sortManual: '手动排序',
+    sortRating: '按评分排序',
+    notesPlaceholder: '双击添加备注...',
+    notesTitle: '项目备注',
+    notesHint: '备注自动保存，支持 Markdown 格式',
+    notesSave: '保存',
+    notesCancel: '取消',
+    globalSettings: '全局设置',
+    borderColor: '边框颜色',
+    defaultColor: '默认',
   },
 
   titleBar: {
@@ -478,6 +488,7 @@ const zh: Translations = {
 
   eco: {
     resourceHub: '资源中心',
+    deepBlueWorkshop: '深蓝工坊',
     configMigrator: '配置迁移',
     searchResources: '搜索资源...',
     allTypes: '全部类型',
