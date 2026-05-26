@@ -17,8 +17,8 @@ export interface ElectronAPI {
   setProjectMetadata: (projectPath: string, updates: Record<string, any>) => Promise<{ success: boolean }>
   // Resource Market（资源仓库）
   resourceStatus: () => Promise<{ success: boolean; initialized: boolean }>
-  resourceQuery: (params: { query: string; repo?: string; type?: string; category?: string; maxResults?: number; minScore?: number }) => Promise<{ success: boolean; resources: Array<{ id: string; name: string; type: string; category: string; tech_stack: string[]; style_tags: string[]; score: number; source_url: string; summary: string; file: string; repo: string }> }>
-  resourceList: (repo?: string) => Promise<{ success: boolean; resources: Array<{ id: string; name: string; type: string; category: string; score: number; summary: string; repo: string }> }>
+  resourceQuery: (params: { query: string; repo?: string; type?: string; category?: string; maxResults?: number; minScore?: number }) => Promise<{ success: boolean; resources: Array<{ id: string; name: string; type: string; category: string; tech_stack: string[]; style_tags: string[]; score: number; source_url: string; summary: string; summary_en?: string; file: string; repo: string }> }>
+  resourceList: (repo?: string) => Promise<{ success: boolean; resources: Array<{ id: string; name: string; type: string; category: string; tech_stack: string[]; style_tags: string[]; score: number; source_url: string; summary: string; summary_en?: string; file: string; repo: string }> }>
   resourceDetail: (id: string) => Promise<{ success: boolean; resource: any }>
   resourceAdd: (repo: string, resource: any) => Promise<{ success: boolean; path?: string }>
   resourceLeaderboard: (category?: string, limit?: number) => Promise<{ success: boolean; leaderboard: Array<{ id: string; name: string; type: string; score: number }> }>
@@ -45,7 +45,11 @@ export interface ElectronAPI {
   pendingCount: () => Promise<{ success: boolean; count: number; error?: string }>
   pendingApprove: (id: string) => Promise<{ success: boolean; path?: string; error?: string }>
   pendingApproveAll: (repo?: string) => Promise<{ success: boolean; results: Array<{ id: string; name: string; success: boolean; message: string }>; error?: string }>
-  pendingAuditTrigger: () => Promise<{ success: boolean; prompt?: string; count?: number; error?: string }>
+  pendingAuditAll: () => Promise<{ success: boolean; results?: Array<{ id: string; name: string; success: boolean; score: number; message: string }>; message?: string; error?: string }>
+  // User Contributions
+  contributionList: () => Promise<{ success: boolean; contributions: Array<{ id: string; name: string; repo: string; type: string; addedAt: string; committed: boolean; committedAt?: string; pushed: boolean; pushedAt?: string }>; error?: string }>
+  contributionCheckStatus: () => Promise<{ success: boolean; repoStatuses: Record<string, { hasRemote: boolean; behind: number; localChanges: Array<{ path: string; status: string }>; uncommittedIds: string[] }>; error?: string }>
+  contributionCommitAll: (message: string) => Promise<{ success: boolean; results: Array<{ repo: string; success: boolean; message: string }>; error?: string }>
   // Horse Farm
   saveHorseFarmData: (projectPath: string, data: { requirements?: string; summary?: string }) => Promise<{ success: boolean; message?: string }>
   loadHorseFarmData: (projectPath: string) => Promise<{ success: boolean; exists?: boolean; requirements?: string; summary?: string; mindmapPath?: string; kbPath?: string }>

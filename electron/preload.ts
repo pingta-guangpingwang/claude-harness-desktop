@@ -81,7 +81,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pendingCount: () => ipcRenderer.invoke('pending:count'),
   pendingApprove: (id: string) => ipcRenderer.invoke('pending:approve', id),
   pendingApproveAll: (repo?: string) => ipcRenderer.invoke('pending:approve-all', repo),
-  pendingAuditTrigger: () => ipcRenderer.invoke('pending:audit-trigger'),
+  pendingAuditAll: () => ipcRenderer.invoke('pending:audit-all'),
+  contributionList: () => ipcRenderer.invoke('contribution:list'),
+  contributionCheckStatus: () => ipcRenderer.invoke('contribution:check-status'),
+  contributionCommitAll: (message: string) => ipcRenderer.invoke('contribution:commit-all', message),
 
   // ============ Sandbox: DBHT Version Control ============
   snapshotBeforeTask: (projectPath: string, taskId: string, desc: string, summary: string) =>

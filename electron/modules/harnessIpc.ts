@@ -311,10 +311,10 @@ export async function registerHarnessIpc(window: BrowserWindow) {
   ipcMain.handle('resource:query', async (_event, params: any) => {
     try {
       const { resourceStore } = await import('../modules/resourceStore.js')
-      if (!resourceStore.isInitialized()) {
+      // 始终从磁盘重载 manifest 以保证数据最新
+      if (resourceStore.isInitialized()) {
         await resourceStore.loadManifests()
       }
-      await resourceStore.ensureManifestsLoaded()
       const resources = resourceStore.queryResources(params || {})
       return { success: true, resources }
     } catch (e) { return { success: false, error: String(e) } }
@@ -323,11 +323,10 @@ export async function registerHarnessIpc(window: BrowserWindow) {
   ipcMain.handle('resource:list', async (_event, repo?: string) => {
     try {
       const { resourceStore } = await import('../modules/resourceStore.js')
-      if (!resourceStore.isInitialized()) {
+      // 始终从磁盘重载 manifest 以保证数据最新（修复本地文件修改后内存过时问题）
+      if (resourceStore.isInitialized()) {
         await resourceStore.loadManifests()
       }
-      // 确保 manifest 已加载到内存（isInitialized 只检查文件存在，不检查内存状态）
-      await resourceStore.ensureManifestsLoaded()
       const resources = resourceStore.getAllResources(repo as any)
       return { success: true, resources }
     } catch (e) { return { success: false, error: String(e) } }
@@ -575,35 +574,175 @@ export async function registerHarnessIpc(window: BrowserWindow) {
     } catch (e) { return { success: false, error: String(e) } }
   })
 
-  ipcMain.handle('pending:audit-trigger', async () => {
+    // 一键审核入库 — 自动审核所有待审资源并直接入库
+  ipcMain.handle('pending:audit-all', async () => {
     try {
       const { pendingResourceStore } = await import('../modules/pendingResourceStore.js')
+      const { resourceStore } = await import('../modules/resourceStore.js')
       const items = pendingResourceStore.getItemsByStatus('pending')
-      if (items.length === 0) return { success: false, error: '没有待审核的资源' }
-      const itemList = items.map((item, i) =>
-        `${i + 1}. **${item.name}** | 类型:${item.resourceType} | 目标仓库:${item.targetRepo} | 分类:${item.category}
-   - 来源: ${item.sourceUrl || '无'}
-   - 摘要: ${item.summary}
-   - 原始内容(前500字): ${item.rawContent.slice(0, 500)}`
-      ).join('\n\n')
-      const prompt = `请审核以下 ${items.length} 条待审资源。对每一条资源：
-1. 评估质量(0-10分)和适用性
-2. 确认分类(类型、仓库)是否正确
-3. 生成标准化的 YAML frontmatter + 正文内容
-4. 使用 update_pending_item 工具逐条写入审核结果
+      if (items.length === 0) return { success: true, results: [], message: '没有待审核的资源' }
 
-审核要点：
-- 资源是否完整可用？
-- 分类和类型是否正确？
-- 技术栈标注是否准确？
-- 内容格式是否符合对应仓库的 manifest 规范？
+      const results: Array<{ id: string; name: string; success: boolean; score: number; message: string }> = []
 
-待审列表：
-${itemList}`
-      return { success: true, prompt, count: items.length }
+      for (const item of items) {
+        // 根据数据完整度自动评分
+        let score = 5 // 基础分
+        if (item.sourceUrl) score += 1
+        if (item.techStack.length > 0) score += 1
+        if (item.category && item.category !== 'other') score += 1
+        if (item.summary.length > 30) score += 1
+        if (item.rawContent.length > 100) score += 1
+        score = Math.min(score, 10)
+
+        // 生成标准化的 YAML frontmatter + 正文
+        const yamlBlock = [
+          '---',
+          'id: ' + item.id,
+          'name: ' + item.name,
+          'type: ' + item.resourceType,
+          'category: ' + item.category,
+          item.techStack.length ? 'tech_stack:' + item.techStack.map(t => '\n  - ' + t).join('') : 'tech_stack: []',
+          'score: ' + score.toFixed(1),
+          'source_url: ' + (item.sourceUrl || ''),
+          'summary: ' + item.summary.replace(/\n/g, ' '),
+          '---',
+          '',
+          item.rawContent || item.summary,
+        ].join('\n')
+
+        try {
+          const result = await resourceStore.addResource({
+            id: item.id,
+            name: item.name,
+            type: item.resourceType,
+            category: item.category,
+            tech_stack: item.techStack,
+            style_tags: [],
+            use_cases: [],
+            score: score,
+            rating_count: 1,
+            usage_count: 0,
+            source_url: item.sourceUrl,
+            summary: item.summary,
+            repo: item.targetRepo as any,
+            content: yamlBlock,
+          }, item.targetRepo as any)
+
+          if (result.success) {
+            pendingResourceStore.updateItem(item.id, {
+              status: 'approved',
+              auditScore: score,
+              auditNotes: '一键自动审核入库',
+              formattedContent: yamlBlock,
+              auditedAt: new Date().toISOString(),
+            })
+            // 记录用户贡献
+            const { userContributionStore } = await import('../modules/userContributionStore.js')
+            userContributionStore.record({ id: item.id, name: item.name, repo: item.targetRepo, type: item.resourceType })
+            results.push({ id: item.id, name: item.name, success: true, score, message: '已入库' })
+          } else {
+            results.push({ id: item.id, name: item.name, success: false, score, message: '写入失败' })
+          }
+        } catch (e: any) {
+          results.push({ id: item.id, name: item.name, success: false, score, message: String(e) })
+        }
+      }
+
+      const successCount = results.filter(r => r.success).length
+      return { success: true, results, message: successCount + '/' + items.length + ' 条资源已入库' }
     } catch (e) { return { success: false, error: String(e) } }
   })
-}
+
+  // ---- 用户贡献管理 ----
+
+  ipcMain.handle('contribution:list', async () => {
+    try {
+      const { userContributionStore } = await import('../modules/userContributionStore.js')
+      return { success: true, contributions: userContributionStore.contributions }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('contribution:check-status', async () => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const { userContributionStore } = await import('../modules/userContributionStore.js')
+      const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit']
+      const repoStatuses = {}
+
+      for (const repo of repos) {
+        let hasRemote = false
+        let behind = 0
+        try {
+          const check = await resourceStore.checkForUpdates(repo)
+          hasRemote = check.hasUpdates
+          behind = check.behind
+        } catch (_) { /* ignore */ }
+
+        const localChanges = await resourceStore.getLocalChanges(repo)
+
+        const contributions = userContributionStore.contributions
+        const uncommittedIds = contributions
+          .filter(c => c.repo === repo && !c.committed)
+          .map(c => c.id)
+
+        repoStatuses[repo] = { hasRemote, behind, localChanges, uncommittedIds }
+      }
+
+      return { success: true, repoStatuses }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
+
+  ipcMain.handle('contribution:commit-all', async (_event, message) => {
+    try {
+      const { resourceStore } = await import('../modules/resourceStore.js')
+      const { userContributionStore } = await import('../modules/userContributionStore.js')
+      const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit']
+      const results = []
+
+      for (const repo of repos) {
+        const changes = await resourceStore.getLocalChanges(repo)
+        if (changes.length === 0) {
+          results.push({ repo, success: true, message: '无变更，跳过' })
+          continue
+        }
+
+        try {
+          const check = await resourceStore.checkForUpdates(repo)
+          if (check.hasUpdates) {
+            await resourceStore.syncRepo(repo)
+          }
+        } catch (_) { /* ignore */ }
+
+        const commitResult = await resourceStore.commitChanges(repo, message)
+        if (!commitResult.success) {
+          results.push({ repo, success: false, message: commitResult.message })
+          continue
+        }
+
+        const status = await resourceStore.getRepoStatus(repo).catch(() => null)
+        const branch = status?.branch || 'main'
+        const pushResult = await resourceStore.pushBranch(repo, branch)
+        if (pushResult.success) {
+          const contribs = userContributionStore.contributions.filter(c => c.repo === repo && !c.committed)
+          const ids = contribs.map(c => c.id)
+          if (ids.length > 0) {
+            userContributionStore.markCommitted(ids)
+            userContributionStore.markPushed(ids)
+          }
+          results.push({ repo, success: true, message: '已提交并推送' })
+        } else {
+          const contribs = userContributionStore.contributions.filter(c => c.repo === repo && !c.committed)
+          const ids = contribs.map(c => c.id)
+          if (ids.length > 0) {
+            userContributionStore.markCommitted(ids)
+          }
+          results.push({ repo, success: false, message: '已提交但推送失败: ' + pushResult.message })
+        }
+      }
+
+      return { success: true, results }
+    } catch (e) { return { success: false, error: String(e) } }
+  })
 
 function sendToRenderer(channel: string, ...args: unknown[]) {
   mainWindow?.webContents.send(channel, ...args)

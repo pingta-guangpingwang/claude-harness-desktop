@@ -23,6 +23,12 @@ interface PendingItem {
   formattedContent: string; auditedAt: string; createdAt: string
 }
 
+interface UserContribution {
+  id: string; name: string; repo: string; type: string
+  addedAt: string; committed: boolean; committedAt?: string
+  pushed: boolean; pushedAt?: string
+}
+
 const REPO_LABELS: Record<string, string> = {
   DeepBluePrompt: '深蓝提示词库',
   DeepBlueCase: '深蓝案例坊',
@@ -91,7 +97,13 @@ export function ResourceMarket() {
   const [pendingCount, setPendingCount] = useState(0)
   const [auditing, setAuditing] = useState(false)
   const [approving, setApproving] = useState<string | null>(null)
-  const [auditPrompt, setAuditPrompt] = useState('')
+  const [auditResults, setAuditResults] = useState<Array<{ id: string; name: string; success: boolean; score: number; message: string }>>([])
+  // 用户贡献追踪
+  const [contributions, setContributions] = useState<UserContribution[]>([])
+  const [showCommit, setShowCommit] = useState(false)
+  const [commitCheck, setCommitCheck] = useState<Record<string, { hasRemote: boolean; behind: number; localChanges: Array<{ path: string; status: string }>; uncommittedIds: string[] }> | null>(null)
+  const [committing, setCommitting] = useState(false)
+  const [commitResult, setCommitResult] = useState<Array<{ repo: string; success: boolean; message: string }> | null>(null)
   const [autoSyncMsg, setAutoSyncMsg] = useState(_autoSyncMsg)
   const [lang, setLang] = useState<'zh' | 'en' | 'bilingual'>(_lang)
   const nextLang = (l: 'zh' | 'en' | 'bilingual') => l === 'zh' ? 'en' : l === 'en' ? 'bilingual' : 'zh'
@@ -392,16 +404,67 @@ export function ResourceMarket() {
     setApproving(null)
   }
 
-  const handleAuditTrigger = async () => {
+  const handleAuditAll = async () => {
+    if (!window.confirm('确认一键审核并入库全部待审资源？\\n\\n系统将自动审核内容并写入仓库。')) return
     setAuditing(true)
+    setAuditResults([])
     try {
-      const res = await window.electronAPI.pendingAuditTrigger()
-      if (res.success && res.prompt) {
-        setAuditPrompt(res.prompt)
+      const res = await window.electronAPI.pendingAuditAll()
+      if (res.success && res.results) {
+        setAuditResults(res.results)
+        loadPending()
+        loadResources()
       }
     } catch { /* ignore */ }
     setAuditing(false)
   }
+
+  // 加载用户贡献列表
+  const loadContributions = async () => {
+    try {
+      const res = await window.electronAPI.contributionList()
+      if (res.success) setContributions(res.contributions || [])
+    } catch { /* ignore */ }
+  }
+
+  // 检测待提交内容
+  const handleCheckCommit = async () => {
+    try {
+      const res = await window.electronAPI.contributionCheckStatus()
+      if (res.success && res.repoStatuses) {
+        setCommitCheck(res.repoStatuses)
+        setCommitResult(null)
+        setShowCommit(true)
+      }
+    } catch { /* ignore */ }
+  }
+
+  // 一键提交所有仓库
+  const handleCommitAll = async () => {
+    setCommitting(true)
+    setCommitResult(null)
+    try {
+      const res = await window.electronAPI.contributionCommitAll('user: 提交用户贡献资源')
+      if (res.success) {
+        setCommitResult(res.results || [])
+        loadContributions()
+        loadResources()
+      }
+    } catch { /* ignore */ }
+    setCommitting(false)
+  }
+
+  // contribution ID → status 快速查询
+  const contribMap = useMemo(() => {
+    const m = new Map<string, UserContribution>()
+    for (const c of contributions) m.set(c.id, c)
+    return m
+  }, [contributions])
+
+  // 初始化时加载贡献
+  useEffect(() => {
+    if (initialized) loadContributions()
+  }, [initialized])
 
   const filtered = useMemo(() => {
     let r = resources
@@ -584,7 +647,7 @@ export function ResourceMarket() {
             background: showContribute ? '#06b6d422' : '#1e293b',
             color: showContribute ? '#06b6d4' : '#94a3b8', cursor: 'pointer',
           }}>{showContribute ? '收起' : '✚ 贡献'}</button>
-        <button onClick={() => { setShowPending(!showPending); loadPending(); if (showPending) setAuditPrompt('') }}
+        <button onClick={() => { setShowPending(!showPending); loadPending(); if (showPending) setAuditResults([]) }}
           style={{
             fontSize: '10px', padding: '3px 8px', borderRadius: '4px', fontWeight: 500,
             border: '1px solid #334155',
@@ -592,6 +655,16 @@ export function ResourceMarket() {
             color: showPending ? '#f59e0b' : pendingCount > 0 ? '#f59e0b' : '#94a3b8',
             cursor: 'pointer',
           }}>{showPending ? '收起' : `${pendingCount} 待审`}</button>
+        <button onClick={handleCheckCommit}
+          disabled={contributions.filter(c => !c.committed).length === 0}
+          title="检测并提交用户贡献到 GitHub"
+          style={{
+            fontSize: '10px', padding: '3px 8px', borderRadius: '4px', fontWeight: 600,
+            border: '1px solid #334155',
+            background: contributions.filter(c => !c.committed).length > 0 ? '#d9770622' : '#1e293b',
+            color: contributions.filter(c => !c.committed).length > 0 ? '#f59e0b' : '#475569',
+            cursor: contributions.filter(c => !c.committed).length > 0 ? 'pointer' : 'default',
+          }}>↑ 提交{contributions.filter(c => !c.committed).length > 0 ? ` (${contributions.filter(c => !c.committed).length})` : ''}</button>
         {syncMessage && <span style={{ fontSize: '10px', color: '#34d399', marginLeft: '6px' }}>{syncMessage}</span>}
       </div>
 
@@ -678,14 +751,14 @@ export function ResourceMarket() {
               待审核资源 ({pendingItems.length})
             </div>
             <div style={{ display: 'flex', gap: '6px' }}>
-              <button onClick={handleAuditTrigger}
+              <button onClick={handleAuditAll}
                 disabled={auditing || pendingItems.filter(i => i.status === 'pending').length === 0}
                 style={{
-                  padding: '4px 10px', fontSize: '11px', background: '#06b6d4', color: '#fff',
-                  border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 500,
+                  padding: '4px 10px', fontSize: '11px', background: '#059669', color: '#fff',
+                  border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600,
                   opacity: auditing || pendingItems.filter(i => i.status === 'pending').length === 0 ? 0.5 : 1,
                 }}>
-                {auditing ? '生成中...' : 'AI 审核'}
+                {auditing ? '处理中...' : '一键入库'}
               </button>
               <button onClick={loadPending}
                 style={{
@@ -694,20 +767,24 @@ export function ResourceMarket() {
                 }}>刷新</button>
             </div>
           </div>
-          {auditPrompt && (
-            <div style={{ marginBottom: '8px', padding: '8px 10px', background: '#1e293b', borderRadius: '6px', border: '1px solid #334155' }}>
+          {auditResults.length > 0 && (
+            <div style={{ marginBottom: '8px', padding: '8px 10px', background: '#05966911', borderRadius: '6px', border: '1px solid #05966933' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#f59e0b' }}>审核提示已生成</span>
-                <div style={{ display: 'flex', gap: '4px' }}>
-                  <button onClick={() => { navigator.clipboard.writeText(auditPrompt) }}
-                    style={{ padding: '2px 8px', fontSize: '10px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>复制</button>
-                  <button onClick={() => setAuditPrompt('')}
-                    style={{ padding: '2px 8px', fontSize: '10px', background: 'none', color: '#94a3b8', border: '1px solid #334155', borderRadius: '4px', cursor: 'pointer' }}>关闭</button>
-                </div>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: '#34d399' }}>
+                  入库完成 ({auditResults.filter(r => r.success).length}/{auditResults.length})
+                </span>
+                <button onClick={() => setAuditResults([])}
+                  style={{ padding: '2px 8px', fontSize: '10px', background: 'none', color: '#94a3b8', border: '1px solid #334155', borderRadius: '4px', cursor: 'pointer' }}>关闭</button>
               </div>
-              <div style={{ fontSize: '10px', color: '#94a3b8', maxHeight: '120px', overflow: 'auto', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                {auditPrompt.slice(0, 800)}
-                {auditPrompt.length > 800 && <span style={{ color: '#64748b' }}>...(已截断)</span>}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: '150px', overflow: 'auto' }}>
+                {auditResults.map(r => (
+                  <div key={r.id} style={{ fontSize: '10px', color: r.success ? '#34d399' : '#ef4444', display: 'flex', gap: '6px' }}>
+                    <span>{r.success ? '✓' : '✕'}</span>
+                    <span style={{ color: '#cbd5e1' }}>{r.name}</span>
+                    <span style={{ color: '#64748b' }}>评分 {r.score}</span>
+                    <span>{r.message}</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -728,6 +805,65 @@ export function ResourceMarket() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Commit dialog */}
+      {showCommit && commitCheck && (
+        <div style={{ padding: '10px 12px', background: '#0f172a', border: '1px solid #1e293b', borderRadius: '6px', marginBottom: '4px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 600, color: '#e2e8f0' }}>提交用户贡献到 GitHub</div>
+            <button onClick={() => { setShowCommit(false); setCommitCheck(null); setCommitResult(null) }}
+              style={{ fontSize: '10px', padding: '2px 8px', background: 'none', color: '#94a3b8', border: '1px solid #334155', borderRadius: '4px', cursor: 'pointer' }}>关闭</button>
+          </div>
+          {(['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit'] as const).map(repo => {
+            const st = commitCheck[repo]
+            if (!st) return null
+            const hasChanges = st.localChanges.length > 0
+            const hasRemote = st.hasRemote
+            return (
+              <div key={repo} style={{ marginBottom: '6px', padding: '6px 8px', background: '#1e293b', borderRadius: '4px', fontSize: '11px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: hasChanges ? '4px' : 0 }}>
+                  <span style={{ fontWeight: 600, color: hasChanges ? '#f59e0b' : '#64748b' }}>{repo.replace('DeepBlue', '')}</span>
+                  {hasRemote && <span style={{ color: '#f59e0b', fontSize: '10px' }}>远程有更新 (↓{st.behind})</span>}
+                  {hasChanges ? (
+                    <span style={{ color: '#f59e0b', fontSize: '10px' }}>{st.localChanges.length} 个待提交文件</span>
+                  ) : (
+                    <span style={{ color: '#34d399', fontSize: '10px' }}>✓ 无变更</span>
+                  )}
+                </div>
+                {hasChanges && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginLeft: '4px' }}>
+                    {st.localChanges.slice(0, 10).map(f => (
+                      <span key={f.path} style={{ fontSize: '9px', color: '#94a3b8', background: '#0f172a', padding: '1px 5px', borderRadius: '3px' }}>
+                        {f.status === 'M' ? '✎' : f.status === 'A' ? '+' : f.status === 'D' ? '−' : '?'} {f.path.slice(0, 50)}
+                      </span>
+                    ))}
+                    {st.localChanges.length > 10 && <span style={{ fontSize: '9px', color: '#64748b' }}>+{st.localChanges.length - 10} 更多</span>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {commitResult && (
+            <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+              {commitResult.map(r => (
+                <div key={r.repo} style={{ fontSize: '10px', color: r.success ? '#34d399' : '#ef4444' }}>
+                  {r.success ? '✓' : '✕'} {r.repo.replace('DeepBlue', '')}: {r.message}
+                </div>
+              ))}
+            </div>
+          )}
+          <button onClick={handleCommitAll}
+            disabled={committing || !Object.values(commitCheck).some(s => s.localChanges.length > 0)}
+            style={{
+              marginTop: '8px', padding: '6px 16px', fontSize: '12px', fontWeight: 600,
+              background: committing ? '#334155' : '#059669', color: '#fff',
+              border: 'none', borderRadius: '4px', cursor: committing ? 'default' : 'pointer',
+              opacity: committing || !Object.values(commitCheck).some(s => s.localChanges.length > 0) ? 0.5 : 1,
+            }}>
+            {committing ? '提交中...' : '确认提交'}
+          </button>
         </div>
       )}
 
@@ -752,12 +888,21 @@ export function ResourceMarket() {
                   background: isSel ? '#1e3a5f' : '#0f172a',
                   border: `1px solid ${isSel ? '#2563eb' : '#1e293b'}`,
                   borderRadius: '8px', padding: '10px 12px', cursor: 'pointer',
-                  transition: 'all 0.15s', contain: 'content',
+                  transition: 'all 0.15s',
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
                       <span style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</span>
                       <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: TYPE_COLORS[item.type]?.bg || '#d9770622', color: TYPE_COLORS[item.type]?.text || '#fbbf24', flexShrink: 0 }}>{TYPE_LABELS[item.type] || item.type}</span>
+                      {contribMap.get(item.id) && (
+                        <span style={{
+                          fontSize: '10px', padding: '1px 5px', borderRadius: '4px', flexShrink: 0,
+                          background: contribMap.get(item.id)!.committed ? '#05966922' : '#f59e0b22',
+                          color: contribMap.get(item.id)!.committed ? '#34d399' : '#fbbf24',
+                        }}>
+                          {contribMap.get(item.id)!.committed ? '已提交' : '新增'}
+                        </span>
+                      )}
                     </div>
                     <span style={{ fontSize: '12px', fontWeight: 700, color: sc, flexShrink: 0, marginLeft: '8px' }}>★ {item.score}</span>
                   </div>
