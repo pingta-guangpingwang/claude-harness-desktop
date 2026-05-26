@@ -471,38 +471,49 @@ export function ResourceMarket() {
           onChange={e => setSearch(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') handleSearch() }}
         />
-        <select value={repoFilter} onChange={e => setRepoFilter(e.target.value)} style={{
-          padding: '6px 8px', fontSize: '11px', background: '#1e293b',
-          border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0',
-        }}>
-          <option value="all">全部仓库</option>
-          <option value="DeepBluePrompt">提示词库</option>
-          <option value="DeepBlueCase">案例坊</option>
-          <option value="DeepBlueKit">工具集</option>
-        </select>
-        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{
-          padding: '6px 8px', fontSize: '11px', background: '#1e293b',
-          border: '1px solid #334155', borderRadius: '6px', color: '#e2e8f0',
-        }}>
-          <option value="all">全部类型</option>
-          <option value="prompt">提示词</option>
-          <option value="template">模板</option>
-          <option value="case">案例</option>
-          <option value="plugin">插件</option>
-          <option value="tool">工具</option>
-          <option value="skill">技能</option>
-          <option value="mcp-server">MCP服务</option>
-          <option value="agent-framework">Agent框架</option>
-          <option value="ai-assistant">AI助手</option>
-        </select>
         <button onClick={handleSearch} style={{
           padding: '6px 14px', fontSize: '12px', background: '#06b6d4', color: '#fff',
           border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600,
         }}>搜索</button>
       </div>
 
-      {/* Sync & Contribute toolbar */}
-      <div style={{ display: 'flex', gap: '6px', padding: '6px 0', borderBottom: '1px solid #1e293b', alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
+      {/* Repo filter tabs */}
+      <div style={{ display: 'flex', gap: '4px', padding: '0 0 8px 0', flexShrink: 0 }}>
+        {(['all', 'DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit'] as const).map(repo => {
+          const active = repoFilter === repo
+          const label = repo === 'all' ? '全部' : repo === 'DeepBluePrompt' ? '提示词库' : repo === 'DeepBlueCase' ? '案例坊' : '工具集'
+          return (
+            <button key={repo} onClick={() => setRepoFilter(repo)} style={{
+              padding: '5px 14px', fontSize: '12px', fontWeight: active ? 700 : 500,
+              borderRadius: '6px', border: 'none', cursor: 'pointer',
+              background: active ? '#2563eb' : '#1e293b',
+              color: active ? '#fff' : '#94a3b8',
+              transition: 'all 0.1s',
+            }}>{label}</button>
+          )
+        })}
+      </div>
+
+      {/* Type filter tabs */}
+      <div style={{ display: 'flex', gap: '3px', padding: '0 0 6px 0', flexShrink: 0, flexWrap: 'wrap' }}>
+        {(['all', 'prompt', 'template', 'case', 'plugin', 'tool', 'skill', 'mcp-server', 'agent-framework', 'ai-assistant'] as const).map(t => {
+          const active = typeFilter === t
+          const label = t === 'all' ? '全部类型' : (TYPE_LABELS[t] || t)
+          return (
+            <button key={t} onClick={() => setTypeFilter(t)} style={{
+              padding: '3px 10px', fontSize: '11px', fontWeight: active ? 600 : 400,
+              borderRadius: '4px', border: 'none', cursor: 'pointer',
+              background: active ? '#0ea5e9' : '#0f172a',
+              color: active ? '#fff' : '#64748b',
+              transition: 'all 0.1s',
+            }}>{label}</button>
+          )
+        })}
+      </div>
+
+      {/* Sync toolbar — 同步操作区，非筛选 */}
+      <div style={{ display: 'flex', gap: '6px', padding: '4px 0', borderTop: '1px solid #1e293b', borderBottom: '1px solid #1e293b', alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
+        <span style={{ fontSize: '9px', color: '#475569', marginRight: '2px' }}>同步:</span>
         {(['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit'] as const).map(repo => {
           const st = repoStatuses[repo]
           const missing = st && !st.exists
