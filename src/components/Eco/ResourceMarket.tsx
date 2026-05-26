@@ -47,20 +47,27 @@ const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
   'ai-assistant':   { bg: '#05966922', text: '#6ee7b7' },
 }
 
-// 模块级缓存：避免组件卸载/重新挂载（切 Tab）时重复执行 Git 操作
+// 模块级缓存：避免组件卸载/重新挂载（切 Tab）时重复执行 Git 操作 + 状态丢失
 let _autoSyncDone = false
+let _autoSyncMsg = ''
 let _repoStatusesCache: Record<string, any> | null = null
+let _resourcesCache: ResourceItem[] | null = null
+let _leaderboardCache: Array<{ id: string; name: string; type: string; score: number }> | null = null
+let _repoFilter: string = 'all'
+let _typeFilter: string = 'all'
+let _lang: 'zh' | 'en' | 'bilingual' = 'zh'
+let _initialized = false
 
 export function ResourceMarket() {
-  const [initialized, setInitialized] = useState(false)
-  const [resources, setResources] = useState<ResourceItem[]>([])
+  const [initialized, setInitialized] = useState(_initialized)
+  const [resources, setResources] = useState<ResourceItem[]>(_resourcesCache || [])
   const [search, setSearch] = useState('')
-  const [repoFilter, setRepoFilter] = useState('all')
-  const [typeFilter, setTypeFilter] = useState('all')
+  const [repoFilter, setRepoFilter] = useState(_repoFilter)
+  const [typeFilter, setTypeFilter] = useState(_typeFilter)
   const [selected, setSelected] = useState<ResourceItem | null>(null)
   const [detailBody, setDetailBody] = useState('')
   const [loading, setLoading] = useState(false)
-  const [leaderboard, setLeaderboard] = useState<Array<{ id: string; name: string; type: string; score: number }>>([])
+  const [leaderboard, setLeaderboard] = useState<Array<{ id: string; name: string; type: string; score: number }>>(_leaderboardCache || [])
 
   // Git sync state
   const [repoStatuses, setRepoStatuses] = useState<Record<string, { behind: number; ahead: number; branch: string; exists: boolean; isGit: boolean }>>({})
@@ -85,8 +92,8 @@ export function ResourceMarket() {
   const [auditing, setAuditing] = useState(false)
   const [approving, setApproving] = useState<string | null>(null)
   const [auditPrompt, setAuditPrompt] = useState('')
-  const [autoSyncMsg, setAutoSyncMsg] = useState('')
-  const [lang, setLang] = useState<'zh' | 'en' | 'bilingual'>('zh')
+  const [autoSyncMsg, setAutoSyncMsg] = useState(_autoSyncMsg)
+  const [lang, setLang] = useState<'zh' | 'en' | 'bilingual'>(_lang)
   const nextLang = (l: 'zh' | 'en' | 'bilingual') => l === 'zh' ? 'en' : l === 'en' ? 'bilingual' : 'zh'
   const langLabel = (l: 'zh' | 'en' | 'bilingual') => l === 'zh' ? '中' : l === 'en' ? 'EN' : '中+EN'
   const fmtSummary = (zh: string, en?: string, max = 120) => {
@@ -98,6 +105,16 @@ export function ResourceMarket() {
   useEffect(() => {
     loadStatus()
   }, [])
+
+  // 同步状态到模块级变量 —— 切 Tab 组件重建时恢复
+  useEffect(() => { _resourcesCache = resources }, [resources])
+  useEffect(() => { _leaderboardCache = leaderboard }, [leaderboard])
+  useEffect(() => { _repoFilter = repoFilter }, [repoFilter])
+  useEffect(() => { _typeFilter = typeFilter }, [typeFilter])
+  useEffect(() => { _lang = lang }, [lang])
+  useEffect(() => { _initialized = initialized }, [initialized])
+  useEffect(() => { _repoStatusesCache = repoStatuses }, [repoStatuses])
+  useEffect(() => { _autoSyncMsg = autoSyncMsg }, [autoSyncMsg])
 
   useEffect(() => {
     if (initialized) loadRepoStatuses()
