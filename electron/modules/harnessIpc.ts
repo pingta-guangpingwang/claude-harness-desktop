@@ -455,12 +455,14 @@ export async function registerHarnessIpc(window: BrowserWindow) {
     try {
       const { pendingResourceStore } = await import('../modules/pendingResourceStore.js')
       const id = `pend-${Date.now().toString(36)}`
+      const rawCat = (item.category as string) || 'other'
+      const cleanCat = rawCat.split(/[,，、]/)[0].trim().slice(0, 30) || 'other'
       pendingResourceStore.addItem({
         id,
         name: item.name || '',
         resourceType: item.resourceType || 'prompt',
         targetRepo: item.targetRepo || 'DeepBluePrompt',
-        category: item.category || 'other',
+        category: cleanCat,
         techStack: item.techStack || [],
         sourceUrl: item.sourceUrl || '',
         summary: item.summary || '',
@@ -526,6 +528,8 @@ export async function registerHarnessIpc(window: BrowserWindow) {
       }, item.targetRepo as any)
       if (result.success) {
         pendingResourceStore.updateItem(id, { status: 'approved' })
+        const { userContributionStore } = await import('../modules/userContributionStore.js')
+        userContributionStore.record({ id: item.id, name: item.name, repo: item.targetRepo, type: item.resourceType })
       }
       return result
     } catch (e) { return { success: false, error: String(e) } }
@@ -562,6 +566,8 @@ export async function registerHarnessIpc(window: BrowserWindow) {
           }, item.targetRepo as any)
           if (r.success) {
             pendingResourceStore.updateItem(item.id, { status: 'approved' })
+            const { userContributionStore } = await import('../modules/userContributionStore.js')
+            userContributionStore.record({ id: item.id, name: item.name, repo: item.targetRepo, type: item.resourceType })
             results.push({ id: item.id, name: item.name, success: true, message: '已入库' })
           } else {
             results.push({ id: item.id, name: item.name, success: false, message: '写入失败' })
@@ -666,7 +672,7 @@ export async function registerHarnessIpc(window: BrowserWindow) {
     try {
       const { resourceStore } = await import('../modules/resourceStore.js')
       const { userContributionStore } = await import('../modules/userContributionStore.js')
-      const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit'] as const
+      const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit', 'DeepBlueIdentity'] as const
       const repoStatuses = {}
 
       for (const repo of repos) {
@@ -693,23 +699,33 @@ export async function registerHarnessIpc(window: BrowserWindow) {
   })
 
   ipcMain.handle('contribution:commit-all', async (_event, message) => {
+    const LOG_PREFIX = '[提交闸门]'
     try {
       const { resourceStore } = await import('../modules/resourceStore.js')
       const { userContributionStore } = await import('../modules/userContributionStore.js')
-      const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit'] as const
+      const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit', 'DeepBlueIdentity'] as const
       const results: Array<{ repo: string; success: boolean; message: string; step?: string }> = []
 
       for (const repo of repos) {
+        console.log(`${LOG_PREFIX} ── 开始处理 ${repo} ──`)
+
         // Step 1: 检查是否有任何变更
         const changes = await resourceStore.getLocalChanges(repo)
+        console.log(`${LOG_PREFIX} [${repo}] Step1 本地变更: ${changes.length} 个文件`, changes.map(c => `[${c.status}]${c.path}`))
         if (changes.length === 0) {
+          console.log(`${LOG_PREFIX} [${repo}] → 无变更，跳过`)
           results.push({ repo, success: true, message: '无变更，跳过' })
           continue
         }
 
         // Step 2: 闸门 1 — 范围管控 + YAML 校验
         const scopeCheck = await resourceStore.validateCommitScope(repo)
+        console.log(`${LOG_PREFIX} [${repo}] Step2 安全检查: valid=${scopeCheck.valid} newFiles=${scopeCheck.newFiles.length} blocked=${scopeCheck.blockedFiles.length}`)
+        if (scopeCheck.blockedFiles.length > 0) {
+          console.log(`${LOG_PREFIX} [${repo}] → 被阻止的文件:`, scopeCheck.blockedFiles.map(f => `[${f.status}]${f.path}`))
+        }
         if (!scopeCheck.valid) {
+          console.log(`${LOG_PREFIX} [${repo}] → 安全检查失败:`, scopeCheck.errors)
           results.push({
             repo,
             success: false,
@@ -719,15 +735,20 @@ export async function registerHarnessIpc(window: BrowserWindow) {
           continue
         }
         if (scopeCheck.newFiles.length === 0) {
+          console.log(`${LOG_PREFIX} [${repo}] → 仅有被阻止的文件，已跳过`)
           results.push({ repo, success: true, message: '仅有被阻止的文件，已跳过' })
           continue
         }
+        console.log(`${LOG_PREFIX} [${repo}] → 允许提交:`, scopeCheck.newFiles.map(f => f.path))
 
         // Step 3: 闸门 2 — 强制拉取（失败立即中止）
+        console.log(`${LOG_PREFIX} [${repo}] Step3 强制拉取...`)
         let pullResult: { success: boolean; message: string }
         try {
           pullResult = await resourceStore.forcePullOrAbort(repo)
+          console.log(`${LOG_PREFIX} [${repo}] → 拉取结果:`, pullResult)
         } catch (e: any) {
+          console.log(`${LOG_PREFIX} [${repo}] → 拉取异常:`, e.message || e)
           results.push({
             repo,
             success: false,
@@ -737,28 +758,35 @@ export async function registerHarnessIpc(window: BrowserWindow) {
           continue
         }
         if (!pullResult.success) {
+          console.log(`${LOG_PREFIX} [${repo}] → 拉取失败:`, pullResult.message)
           results.push({ repo, success: false, message: pullResult.message, step: 'pull' })
           continue
         }
 
         // Step 4: 精确提交（仅新增文件）
         const newFilePaths = scopeCheck.newFiles.map(f => f.path)
+        console.log(`${LOG_PREFIX} [${repo}] Step4 提交 ${newFilePaths.length} 个文件:`, newFilePaths)
         const commitResult = await resourceStore.commitChanges(repo, message, newFilePaths)
+        console.log(`${LOG_PREFIX} [${repo}] → 提交结果:`, commitResult)
         if (!commitResult.success) {
           results.push({ repo, success: false, message: commitResult.message, step: 'commit' })
           continue
         }
 
         // Step 5: 闸门 3 — 安全推送（冲突自动重试）
+        console.log(`${LOG_PREFIX} [${repo}] Step5 推送...`)
         const status = await resourceStore.getRepoStatus(repo).catch(() => null)
         const branch = status?.branch || 'main'
+        console.log(`${LOG_PREFIX} [${repo}] → 当前分支: ${branch}`)
         const pushResult = await resourceStore.safePushBranch(repo, branch)
+        console.log(`${LOG_PREFIX} [${repo}] → 推送结果:`, pushResult)
         if (pushResult.success) {
           const contribs = userContributionStore.contributions.filter(c => c.repo === repo && !c.committed)
           const ids = contribs.map(c => c.id)
           if (ids.length > 0) {
             userContributionStore.markCommitted(ids)
             userContributionStore.markPushed(ids)
+            console.log(`${LOG_PREFIX} [${repo}] → 标记已提交+已推送:`, ids)
           }
           const retryNote = pushResult.retried ? ' (自动合并远程更新后推送)' : ''
           results.push({ repo, success: true, message: `已提交 ${newFilePaths.length} 个文件并推送${retryNote}` })
@@ -767,13 +795,15 @@ export async function registerHarnessIpc(window: BrowserWindow) {
           const ids = contribs.map(c => c.id)
           if (ids.length > 0) {
             userContributionStore.markCommitted(ids)
+            console.log(`${LOG_PREFIX} [${repo}] → 标记已提交(推送失败):`, ids)
           }
           results.push({ repo, success: false, message: '已提交但推送失败: ' + pushResult.message, step: 'push' })
         }
       }
 
+      console.log(`${LOG_PREFIX} ── 全部完成 ──`, results.map(r => `${r.repo}:${r.success ? 'OK' : 'FAIL'}[${r.step || '-'}]`))
       return { success: true, results }
-    } catch (e) { return { success: false, error: String(e) } }
+    } catch (e) { console.log(`${LOG_PREFIX} 异常:`, e); return { success: false, error: String(e) } }
   })
 
 }

@@ -30,7 +30,7 @@ export const ResourceInjectorProcessor: ContextProcessor = (view, ctx) => {
     const TYPE_CN: Record<string, string> = {
       prompt: '提示词', template: '模板', case: '案例',
       plugin: '插件', tool: '工具', skill: '技能',
-      'mcp-server': 'MCP服务', 'agent-framework': 'Agent框架', 'ai-assistant': 'AI助手',
+      'mcp-server': 'MCP服务', 'agent-framework': 'Agent框架', 'ai-assistant': 'AI助手', identity: '角色身份',
     }
 
     let ref = '\n## 参考资源仓库匹配结果\n'
@@ -107,7 +107,7 @@ export const searchResourcesTool: AgentTool = {
     type: 'object',
     properties: {
       query: { type: 'string', description: '检索关键词，如"数据看板 React 图表"或"登录页面设计"' },
-      resource_type: { type: 'string', description: '资源类型筛选: all(全部), prompt(提示词), template(模板), case(案例), plugin(插件), tool(工具), skill(技能), mcp-server(MCP服务), agent-framework(Agent框架), ai-assistant(AI助手)' },
+      resource_type: { type: 'string', description: '资源类型筛选: all(全部), prompt(提示词), template(模板), case(案例), plugin(插件), tool(工具), skill(技能), mcp-server(MCP服务), agent-framework(Agent框架), ai-assistant(AI助手), identity(角色身份)' },
       max_results: { type: 'number', description: '最大返回数，默认 5，最大 10' },
     },
   },
@@ -142,12 +142,12 @@ export const addResourceTool: AgentTool = {
   parameters: {
     type: 'object',
     properties: {
-      repo: { type: 'string', description: '目标仓库: DeepBluePrompt(提示词), DeepBlueCase(模板案例), DeepBlueKit(组件工具)' },
+      repo: { type: 'string', description: '目标仓库: DeepBluePrompt(提示词), DeepBlueCase(模板案例), DeepBlueKit(组件工具), DeepBlueIdentity(角色身份)' },
       resource_type: { type: 'string', description: '资源类型: prompt, template, case, plugin, tool, skill, mcp-server, agent-framework, ai-assistant' },
       name: { type: 'string', description: '资源名称' },
       content: { type: 'string', description: '资源内容：提示词正文、项目介绍、工具描述等' },
       source_url: { type: 'string', description: '来源地址（GitHub/npm/其他）' },
-      category: { type: 'string', description: '分类标签' },
+      category: { type: 'string', description: '单个分类标签，如 react, database, devops。必须是简短的单标签，不能是逗号分隔的多个值或技术栈列表' },
       tech_stack: { type: 'array', items: { type: 'string' }, description: '技术栈列表' },
     },
     required: ['repo', 'resource_type', 'name', 'content'],
@@ -158,7 +158,7 @@ export const addResourceTool: AgentTool = {
   isDestructive: false,
   async execute(params): Promise<ToolResult> {
     const repo = params.repo as string
-    const validRepos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit']
+    const validRepos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit', 'DeepBlueIdentity']
     if (!validRepos.includes(repo)) {
       return { success: false, output: `无效仓库: ${repo}。可用: ${validRepos.join(', ')}` }
     }
@@ -168,11 +168,13 @@ export const addResourceTool: AgentTool = {
     }
 
     const id = `${(params.resource_type as string).slice(0, 6)}-user-${Date.now().toString(36)}`
+    const rawCat = (params.category as string) || 'other'
+    const cleanCat = rawCat.split(/[,，、]/)[0].trim().slice(0, 30) || 'other'
     const result = await resourceStore.addResource({
       id,
       name: params.name as string,
       type: params.resource_type as string,
-      category: (params.category as string) || 'other',
+      category: cleanCat,
       tech_stack: (params.tech_stack as string[]) || [],
       style_tags: [],
       use_cases: [],
@@ -234,8 +236,8 @@ export const suggestResourceTool: AgentTool = {
     properties: {
       name: { type: 'string', description: '资源名称，简洁明了' },
       resource_type: { type: 'string', description: '资源类型: prompt, template, case, plugin, tool, skill, mcp-server, agent-framework, ai-assistant' },
-      target_repo: { type: 'string', description: '目标仓库: DeepBluePrompt(提示词), DeepBlueCase(模板案例), DeepBlueKit(组件工具)' },
-      category: { type: 'string', description: '分类标签，如 react, database, devops 等' },
+      target_repo: { type: 'string', description: '目标仓库: DeepBluePrompt(提示词), DeepBlueCase(模板案例), DeepBlueKit(组件工具), DeepBlueIdentity(角色身份)' },
+      category: { type: 'string', description: '单个分类标签，如 react, database, devops。必须是简短的单标签，不能是逗号分隔的多个值或技术栈列表' },
       tech_stack: { type: 'array', items: { type: 'string' }, description: '技术栈列表' },
       source_url: { type: 'string', description: '来源 URL（GitHub/npm/官网）' },
       summary: { type: 'string', description: '资源摘要，100-300字，说明用途和亮点' },
@@ -250,12 +252,15 @@ export const suggestResourceTool: AgentTool = {
   async execute(params): Promise<ToolResult> {
     const { pendingResourceStore } = await import('../modules/pendingResourceStore.js')
     const id = `pend-${Date.now().toString(36)}`
+    // 清洗 category：取逗号/空格分割后的第一段作为单标签
+    const rawCategory = (params.category as string) || 'other'
+    const category = rawCategory.split(/[,，、]/)[0].trim().slice(0, 30) || 'other'
     pendingResourceStore.addItem({
       id,
       name: params.name as string,
       resourceType: params.resource_type as string,
       targetRepo: params.target_repo as string,
-      category: (params.category as string) || 'other',
+      category,
       techStack: (params.tech_stack as string[]) || [],
       sourceUrl: (params.source_url as string) || '',
       summary: params.summary as string,

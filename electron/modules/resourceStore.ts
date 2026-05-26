@@ -8,7 +8,7 @@ import * as yaml from 'js-yaml'
 
 // ---- 类型 ----
 
-export type RepoName = 'DeepBluePrompt' | 'DeepBlueCase' | 'DeepBlueKit'
+export type RepoName = 'DeepBluePrompt' | 'DeepBlueCase' | 'DeepBlueKit' | 'DeepBlueIdentity'
 
 export interface ResourceItem {
   id: string
@@ -69,7 +69,7 @@ interface Manifest {
   items: ManifestItem[]
 }
 
-const REPO_NAMES: RepoName[] = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit']
+const REPO_NAMES: RepoName[] = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit', 'DeepBlueIdentity']
 
 function getResourceDir(): string {
   // 用户数据目录下的 resources 子目录
@@ -310,7 +310,7 @@ class ResourceStore {
     }
 
     // 确定目录
-    const category = (resource.category || 'other').replace(/[/\\]/g, '-')
+    const category = (resource.category || 'other').replace(/[/\\, ]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
     const dir = path.join(repoPath, this.getTypeDir(repo, resource.type), category)
     fs.ensureDirSync(dir)
 
@@ -521,7 +521,15 @@ class ResourceStore {
       const output = execSync('git status --porcelain', { cwd: repoPath, encoding: 'utf-8', timeout: 10000 })
       return output.trim().split('\n').filter(Boolean).map(line => {
         const status = line.slice(0, 2).trim()
-        const filePath = line.slice(3).trim()
+        let filePath = line.slice(3).trim()
+        // 还原 git C-style 转义路径 (含空格等特殊字符时自动添加双引号)
+        if (filePath.startsWith('"') && filePath.endsWith('"')) {
+          filePath = filePath.slice(1, -1)
+            .replace(/\\t/g, '\t')
+            .replace(/\\n/g, '\n')
+            .replace(/\\"/g, '"')
+            .replace(/\\\\/g, '\\')
+        }
         return { path: filePath, status }
       })
     } catch {
@@ -541,6 +549,8 @@ class ResourceStore {
     const BLOCKED = new Set(['M', 'MM', 'D', 'R', 'RM', 'RD', 'C', 'U', 'UU', 'UA', 'AU', 'DD', 'AA'])
 
     for (const change of allChanges) {
+      // 跳过目录（git status 对含未追踪文件的目录会加 / 后缀）
+      if (change.path.endsWith('/') || change.path.endsWith('\\')) continue
       if (ALLOWED.has(change.status)) {
         newFiles.push(change)
       } else if (BLOCKED.has(change.status)) {
@@ -559,6 +569,10 @@ class ResourceStore {
     const fullPath = path.join(repoPath, filePath)
 
     try {
+      const st = await fs.stat(fullPath)
+      if (st.isDirectory()) {
+        return { valid: false, errors: [`${filePath} 是一个目录，不是资源文件，请清理后重试`] }
+      }
       const raw = await fs.readFile(fullPath, 'utf-8')
       const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)
       if (!fmMatch) {
@@ -579,7 +593,7 @@ class ResourceStore {
         }
       }
 
-      const VALID_TYPES = ['prompt', 'template', 'case', 'plugin', 'tool', 'skill', 'mcp-server', 'agent-framework', 'ai-assistant']
+      const VALID_TYPES = ['prompt', 'template', 'case', 'plugin', 'tool', 'skill', 'mcp-server', 'agent-framework', 'ai-assistant', 'identity']
       if (fm.type && !VALID_TYPES.includes(fm.type)) {
         errors.push(`文件 ${filePath} 的 type 字段值 "${fm.type}" 不在有效类型列表中`)
       }
@@ -919,6 +933,7 @@ class ResourceStore {
       if (type === 'ai-assistant') return 'ai-assistants'
       return 'skills'
     }
+    if (repo === 'DeepBlueIdentity') return 'identities'
     return 'other'
   }
 }

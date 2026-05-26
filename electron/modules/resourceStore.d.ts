@@ -1,4 +1,4 @@
-export type RepoName = 'DeepBluePrompt' | 'DeepBlueCase' | 'DeepBlueKit';
+export type RepoName = 'DeepBluePrompt' | 'DeepBlueCase' | 'DeepBlueKit' | 'DeepBlueIdentity';
 export interface ResourceItem {
     id: string;
     name: string;
