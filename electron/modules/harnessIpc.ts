@@ -666,7 +666,7 @@ export async function registerHarnessIpc(window: BrowserWindow) {
     try {
       const { resourceStore } = await import('../modules/resourceStore.js')
       const { userContributionStore } = await import('../modules/userContributionStore.js')
-      const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit']
+      const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit'] as const
       const repoStatuses = {}
 
       for (const repo of repos) {
@@ -696,7 +696,7 @@ export async function registerHarnessIpc(window: BrowserWindow) {
     try {
       const { resourceStore } = await import('../modules/resourceStore.js')
       const { userContributionStore } = await import('../modules/userContributionStore.js')
-      const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit']
+      const repos = ['DeepBluePrompt', 'DeepBlueCase', 'DeepBlueKit'] as const
       const results: Array<{ repo: string; success: boolean; message: string; step?: string }> = []
 
       for (const repo of repos) {
@@ -776,6 +776,7 @@ export async function registerHarnessIpc(window: BrowserWindow) {
     } catch (e) { return { success: false, error: String(e) } }
   })
 
+}
 function sendToRenderer(channel: string, ...args: unknown[]) {
   mainWindow?.webContents.send(channel, ...args)
 }
