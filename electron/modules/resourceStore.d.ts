@@ -113,22 +113,17 @@ declare class ResourceStore {
         behind: number;
         message: string;
     }>;
+    /** 强制拉取最新代码 — 失败立即中止，不静默吞错误 */
+    forcePullOrAbort(repo: RepoName): Promise<{
+        success: boolean;
+        message: string;
+    }>;
     /** 获取本地变更文件列表（git status） */
     getLocalChanges(repo: RepoName): Promise<Array<{
         path: string;
         status: string;
     }>>;
-    /** 创建贡献分支 */
-    createContributionBranch(repo: RepoName, branchName: string): Promise<{
-        success: boolean;
-        message: string;
-    }>;
-    /** 强制拉取最新代码，失败则中止（不静默吞错误） */
-    forcePullOrAbort(repo: RepoName): Promise<{
-        success: boolean;
-        message: string;
-    }>;
-    /** 获取仅新增文件的列表（排除修改/删除/重命名） */
+    /** 分类变更文件：仅新增(??/A/AM) vs 被阻止(M/D/R等) */
     getNewFilesOnly(repo: RepoName): Promise<{
         newFiles: Array<{
             path: string;
@@ -139,12 +134,12 @@ declare class ResourceStore {
             status: string;
         }>;
     }>;
-    /** 验证单个文件的 YAML frontmatter 必填字段 */
+    /** 校验单个资源文件的 YAML frontmatter */
     validateNewFileYaml(repo: RepoName, filePath: string): Promise<{
         valid: boolean;
         errors: string[];
     }>;
-    /** 提交范围验证：检查仅新增文件 + YAML 必填字段 */
+    /** 提交范围验证：仅新增文件 + YAML 必填字段 */
     validateCommitScope(repo: RepoName): Promise<{
         valid: boolean;
         errors: string[];
@@ -157,7 +152,12 @@ declare class ResourceStore {
             status: string;
         }>;
     }>;
-    /** 提交变更（支持指定文件范围，不指定则仅提交新增文件） */
+    /** 创建贡献分支 */
+    createContributionBranch(repo: RepoName, branchName: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
+    /** 提交变更 — 默认仅提交新增文件，需传入 files 或用 getNewFilesOnly 自动过滤 */
     commitChanges(repo: RepoName, message: string, files?: string[]): Promise<{
         success: boolean;
         message: string;
@@ -167,7 +167,7 @@ declare class ResourceStore {
         success: boolean;
         message: string;
     }>;
-    /** 安全推送：遇到 non-fast-forward 则 pull --rebase 后重试一次 */
+    /** 安全推送：遇到 non-fast-forward 拒绝则 pull --rebase 后重试一次 */
     safePushBranch(repo: RepoName, branchName: string): Promise<{
         success: boolean;
         message: string;

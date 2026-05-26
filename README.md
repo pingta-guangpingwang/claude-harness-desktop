@@ -23,6 +23,9 @@
 - **🔌 插件生态** — 标准化插件规范，20+ 精选插件(Prettier/ESLint/TypeScript/pnpm/Docker 等)，模块化隔离、能力注册、权限管控
 - **🎛️ 角色管理面板** — 可视化角色开关、自定义角色创建、评分排行榜、主开关控制
 - **⚡ 工作流引擎** — 14 种节点类型的可视化工作流编辑器，拖拽搭建自动化管线
+- **🏪 深蓝工坊** — 三仓库生态资源市场（提示词 / 模板 / 案例 / MCP 服务 / Agent 框架 / AI 助手），中英双语浏览，一键同步 + 页签筛选
+- **📦 一键入库** — 用户添加资源 → 自动评分 → 生成 YAML frontmatter → 写入本地仓库，全程自动
+- **🛡️ 提交安全闸门** — 四道闸门保护：强制拉取(fail-fast)、范围管控(仅新增)、YAML 格式校验、推送冲突自动重试
 
 ## 快速开始
 
@@ -72,12 +75,15 @@ electron/
     docToSkill.ts      # 文档 → 技能 加载器
     reflector.ts       # 任务反思与经验提取
   modules/
-    ptyManager.ts      # PTY 终端池管理 (自动应答、心跳检测、噪声过滤)
-    harnessIpc.ts      # 驾驭智能体 IPC 通道
-    sessionManager.ts  # 会话持久化
-    projectManager.ts  # 项目配置管理
-    projectLauncher.ts # 一键启动脚本
-  cli/                 # CLI 命令注册与执行
+    ptyManager.ts           # PTY 终端池管理 (自动应答、心跳检测、噪声过滤)
+    harnessIpc.ts           # 驾驭智能体 IPC 通道
+    sessionManager.ts       # 会话持久化
+    projectManager.ts       # 项目配置管理
+    projectLauncher.ts      # 一键启动脚本
+    resourceStore.ts        # 生态资源仓库引擎 (三仓库管理/同步/校验/贡献)
+    userContributionStore.ts # 用户贡献追踪 (新增/已提交/已推送)
+    pendingResourceStore.ts # 待审核资源队列
+  cli/                     # CLI 命令注册与执行
   plugins/             # 插件系统 (20+ 插件)
   workflow/            # 工作流引擎
 src/
@@ -87,6 +93,7 @@ src/
     CLI/               # 命令面板、批量管理器
     Identity/          # 角色卡片与切换
     Productivity/      # 效率仪表盘、模板库、快速启动器
+    Eco/               # 深蓝工坊 (资源市场/配置迁移)
   context/             # React Context 全局状态
   i18n/                # 中英文翻译
 public/                 # 静态资源 (赞助码 / 交流群)
@@ -131,6 +138,10 @@ tests/                  # 单元测试 (5 套件, 115 用例)
 | v3.0 | 驾驭智能体 Agent 基础设施 (六步管线/记忆/预算/追踪/HITL) |
 | v3.5 | 角色评分引擎 + 角色管理面板 + 自定义角色 |
 | v3.7 | 角色启用/禁用控制 + 持久化 + 忙保护 + 自主决策 |
+| v3.8 | 深蓝工坊 v1 — 三仓库生态资源市场 + 9 种资源类型 + 一键同步 |
+| v3.9 | 一键入库 + 自动评分 + YAML 生成 + 用户贡献追踪 |
+| v4.0 | 提交安全闸门 — 防污染/防乱删改/防格式错误 |
+| v4.1 | MCP Server / Agent Framework / AI Assistant 生态类型扩展 |
 
 ## 插件商店
 
