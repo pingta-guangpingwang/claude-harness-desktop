@@ -85,6 +85,7 @@ export function ResourceMarket() {
   const [auditing, setAuditing] = useState(false)
   const [approving, setApproving] = useState<string | null>(null)
   const [auditPrompt, setAuditPrompt] = useState('')
+  const [autoSyncMsg, setAutoSyncMsg] = useState('')
   const [lang, setLang] = useState<'zh' | 'en' | 'bilingual'>('zh')
   const nextLang = (l: 'zh' | 'en' | 'bilingual') => l === 'zh' ? 'en' : l === 'en' ? 'bilingual' : 'zh'
   const langLabel = (l: 'zh' | 'en' | 'bilingual') => l === 'zh' ? '中' : l === 'en' ? 'EN' : '中+EN'
@@ -137,11 +138,32 @@ export function ResourceMarket() {
     _autoSyncDone = true
     try {
       const r = await window.electronAPI.resourceAutoSync()
+      setAutoSyncMsg(r.message)
       if (r.synced.length > 0) {
         loadResources()
         loadLeaderboard()
       }
-    } catch { /* ignore */ }
+    } catch {
+      setAutoSyncMsg('自动同步失败，请检查网络后手动同步')
+    }
+  }
+
+  const syncAll = async () => {
+    setSyncing('__all__')
+    setSyncMessage('')
+    try {
+      const r = await window.electronAPI.resourceAutoSync()
+      setSyncMessage(r.message)
+      setAutoSyncMsg(r.message)
+      if (r.synced.length > 0) {
+        loadResources()
+        loadLeaderboard()
+      }
+      await loadRepoStatuses(true)
+    } catch {
+      setSyncMessage('同步失败，请检查网络连接')
+    }
+    setSyncing(null)
   }
 
   const loadResources = async () => {
@@ -471,12 +493,12 @@ export function ResourceMarket() {
           if (missing || notGit) {
             return (
               <button key={repo} onClick={() => handleClone(repo)}
-                disabled={syncing === repo}
+                disabled={syncing !== null}
                 style={{
                   fontSize: '10px', padding: '3px 8px', borderRadius: '4px', fontWeight: 500,
-                  border: '1px solid #334155', cursor: syncing === repo ? 'not-allowed' : 'pointer',
+                  border: '1px solid #334155', cursor: syncing !== null ? 'not-allowed' : 'pointer',
                   background: '#d9770622', color: '#f59e0b',
-                  opacity: syncing === repo ? 0.5 : 1,
+                  opacity: syncing !== null ? 0.5 : 1,
                 }}>
                 {syncing === repo ? '⟳' : '⬇'} {repo.replace('DeepBlue', '')} {missing ? '(未克隆)' : '(需修复)'}
               </button>
@@ -485,14 +507,14 @@ export function ResourceMarket() {
           return (
             <span key={repo} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <button onClick={() => handleSync(repo)}
-                disabled={syncing === repo}
+                disabled={syncing !== null}
                 title={st ? `${st.branch} | behind:${st.behind} ahead:${st.ahead}` : '加载中...'}
                 style={{
                   fontSize: '10px', padding: '3px 8px', borderRadius: '4px', fontWeight: 500,
-                  border: '1px solid #334155', cursor: syncing === repo ? 'not-allowed' : 'pointer',
+                  border: '1px solid #334155', cursor: syncing !== null ? 'not-allowed' : 'pointer',
                   background: st?.behind ? '#d9770622' : '#1e293b',
                   color: st?.behind ? '#f59e0b' : '#94a3b8',
-                  opacity: syncing === repo ? 0.5 : 1,
+                  opacity: syncing !== null ? 0.5 : 1,
                 }}>
                 {syncing === repo ? '⟳' : '↡'} {repo.replace('DeepBlue', '')}
                 {st?.behind ? ` ${st.behind}` : ''}
@@ -501,6 +523,17 @@ export function ResourceMarket() {
           )
         })}
         <span style={{ flex: 1 }} />
+        {autoSyncMsg && <span style={{ fontSize: '10px', color: autoSyncMsg.includes('失败') ? '#ef4444' : '#34d399', marginRight: '4px' }}>{autoSyncMsg}</span>}
+        <button onClick={syncAll}
+          disabled={syncing === '__all__'}
+          title="从 GitHub 拉取所有仓库最新数据"
+          style={{
+            fontSize: '10px', padding: '3px 10px', borderRadius: '4px', fontWeight: 600,
+            border: '1px solid #334155',
+            background: syncing === '__all__' ? '#334155' : '#059669',
+            color: '#fff', cursor: syncing === '__all__' ? 'not-allowed' : 'pointer',
+            opacity: syncing === '__all__' ? 0.6 : 1,
+          }}>{syncing === '__all__' ? '⟳ 同步中...' : '⬇ 一键同步'}</button>
         <button onClick={() => setLang(nextLang)}
           title="中/EN/双语 / Chinese/English/Bilingual"
           style={{
