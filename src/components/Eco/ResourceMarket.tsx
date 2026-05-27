@@ -1,4 +1,6 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react'
+import { SafeText } from '../Shared/SafeText'
+import { VirtualList } from '../Shared/VirtualList'
 
 interface ResourceItem {
   id: string
@@ -98,17 +100,49 @@ export function ResourceMarket() {
   const [commitResult, setCommitResult] = useState<Array<{ repo: string; success: boolean; message: string; step?: string }> | null>(null)
   const [showAddTip, setShowAddTip] = useState(false)
   const [autoSyncMsg, setAutoSyncMsg] = useState(_autoSyncMsg)
+  const [autoSyncing, setAutoSyncing] = useState(false)
+  const [checkingCommit, setCheckingCommit] = useState(false)
+  // Facet taxonomy
+  const [facetDict, setFacetDict] = useState<Record<string, any>>({})
+  const codeMap = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const [, def] of Object.entries(facetDict)) {
+      const vals = (def as any)?.values || []
+      for (const v of vals) {
+        m.set(v.code, v.label)
+      }
+    }
+    return m
+  }, [facetDict])
+
+  const resolveFacetsLocal = useCallback((facetsData: Record<string, any> | undefined) => {
+    if (!facetsData || Object.keys(facetDict).length === 0) return {}
+    const result: Record<string, { label: string; values: Array<{ code: string; label: string }> }> = {}
+    for (const [name, def] of Object.entries(facetDict)) {
+      const codes = facetsData[name]
+      if (!codes) continue
+      const arr = Array.isArray(codes) ? codes : [codes]
+      if (arr.length === 0) continue
+      const values = arr.filter((c: string) => c !== '000' && !c.endsWith('000')).map((c: string) => ({ code: c, label: codeMap.get(c) || c }))
+      if (values.length > 0) {
+        result[name] = { label: (def as any).label || name, values }
+      }
+    }
+    return result
+  }, [facetDict, codeMap])
+
   const [lang, setLang] = useState<'zh' | 'en' | 'bilingual'>(_lang)
   const nextLang = (l: 'zh' | 'en' | 'bilingual') => l === 'zh' ? 'en' : l === 'en' ? 'bilingual' : 'zh'
   const langLabel = (l: 'zh' | 'en' | 'bilingual') => l === 'zh' ? '中' : l === 'en' ? 'EN' : '中+EN'
-  const fmtSummary = (zh: string, en?: string, max = 120) => {
-    if (lang === 'en' && en) return en.slice(0, max)
-    if (lang === 'bilingual' && en) return zh.slice(0, max / 2) + '\n' + en.slice(0, max / 2)
-    return zh.slice(0, max)
+  const fmtSummary = (zh: string, en?: string, _max?: number) => {
+    if (lang === 'en' && en) return en
+    if (lang === 'bilingual' && en) return zh + '\n' + en
+    return zh
   }
 
   useEffect(() => {
     loadStatus()
+    window.electronAPI.taxonomyFacets().then((d: any) => { if (d) setFacetDict(d) }).catch(() => {})
   }, [])
 
   // 同步状态到模块级变量 —— 切 Tab 组件重建时恢复
@@ -149,6 +183,7 @@ export function ResourceMarket() {
         setInitialized(res.initialized)
         if (res.initialized) {
           loadLeaderboard()
+          loadContributions()
           // 首次打开时后台静默同步，后续切 Tab 不再重复拉取
           if (!_autoSyncDone) autoSync()
         }
@@ -158,6 +193,7 @@ export function ResourceMarket() {
 
   const autoSync = async () => {
     _autoSyncDone = true
+    setAutoSyncing(true)
     try {
       const r = await window.electronAPI.resourceAutoSync()
       setAutoSyncMsg(r.message)
@@ -168,11 +204,12 @@ export function ResourceMarket() {
     } catch {
       setAutoSyncMsg('自动同步失败，请检查网络后手动同步')
     }
+    setAutoSyncing(false)
   }
 
   const syncAll = async () => {
     setSyncing('__all__')
-    setSyncMessage('')
+    setSyncMessage('正在从 GitHub 获取最新数据...')
     try {
       const r = await window.electronAPI.resourceAutoSync()
       setSyncMessage(r.message)
@@ -328,8 +365,10 @@ export function ResourceMarket() {
       if (res.success) {
         loadPending()
         loadResources()
+      } else {
+        setAuditResults([{ id, name: '', success: false, score: 0, message: res.error || '批准失败' }])
       }
-    } catch { /* ignore */ }
+    } catch (e: any) { setAuditResults([{ id, name: '', success: false, score: 0, message: String(e) }]) }
     setApproving(null)
   }
 
@@ -344,8 +383,10 @@ export function ResourceMarket() {
         loadPending()
         loadResources()
         loadContributions()
+      } else {
+        setAuditResults([{ id: '', name: '', success: false, score: 0, message: res.error || res.message || '审核失败' }])
       }
-    } catch { /* ignore */ }
+    } catch (e: any) { setAuditResults([{ id: '', name: '', success: false, score: 0, message: String(e) }]) }
     setAuditing(false)
   }
 
@@ -359,6 +400,7 @@ export function ResourceMarket() {
 
   // 检测待提交内容
   const handleCheckCommit = async () => {
+    setCheckingCommit(true)
     try {
       const res = await window.electronAPI.contributionCheckStatus()
       if (res.success && res.repoStatuses) {
@@ -366,6 +408,7 @@ export function ResourceMarket() {
         setCommitResult(null)
       }
     } catch { /* ignore */ }
+    setCheckingCommit(false)
   }
 
   // 一键提交所有仓库
@@ -378,8 +421,17 @@ export function ResourceMarket() {
         setCommitResult(res.results || [])
         loadContributions()
         loadResources()
+        // 刷新本次提交检查结果，避免旧数据残留
+        try {
+          const fresh = await window.electronAPI.contributionCheckStatus()
+          if (fresh.success && fresh.repoStatuses) setCommitCheck(fresh.repoStatuses)
+        } catch { /* ignore */ }
+      } else {
+        setCommitResult([{ repo: '', success: false, message: res.error || '提交失败', step: 'commit' }])
       }
-    } catch { /* ignore */ }
+    } catch (e: any) {
+      setCommitResult([{ repo: '', success: false, message: String(e), step: 'commit' }])
+    }
     setCommitting(false)
   }
 
@@ -390,9 +442,13 @@ export function ResourceMarket() {
     return m
   }, [contributions])
 
-  // 初始化时加载贡献
+  // 初始化时加载贡献 + 清理已入库旧记录
   useEffect(() => {
-    if (initialized) { loadContributions(); loadPending() }
+    if (initialized) {
+      loadContributions()
+      loadPending()
+      window.electronAPI.pendingCleanup().then(() => loadPending()).catch(() => {})
+    }
   }, [initialized])
 
   const filtered = useMemo(() => {
@@ -543,7 +599,8 @@ export function ResourceMarket() {
           )
         })}
         <span style={{ flex: 1 }} />
-        {autoSyncMsg && <span style={{ fontSize: '10px', color: autoSyncMsg.includes('失败') ? '#ef4444' : '#34d399', marginRight: '4px' }}>{autoSyncMsg}</span>}
+        {autoSyncing && <span style={{ fontSize: '10px', color: '#60a5fa', marginRight: '4px' }}>⟳ 正在从 GitHub 获取最新数据...</span>}
+        {!autoSyncing && autoSyncMsg && <span style={{ fontSize: '10px', color: autoSyncMsg.includes('失败') ? '#ef4444' : '#34d399', marginRight: '4px' }}>{autoSyncMsg}</span>}
         <button onClick={syncAll}
           disabled={syncing === '__all__'}
           title="从 GitHub 拉取所有仓库最新数据"
@@ -622,6 +679,10 @@ export function ResourceMarket() {
             onApprove={handleApprove}
             onRemove={handlePendingRemove}
           />
+        ) : showCommit && checkingCommit ? (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '13px' }}>
+            ⟳ 正在检查提交状态...
+          </div>
         ) : showCommit && commitCheck ? (
           <CommitPanel
             commitCheck={commitCheck} commitResult={commitResult} committing={committing}
@@ -674,9 +735,16 @@ export function ResourceMarket() {
                         <span style={{ fontSize: '10px', color: '#64748b' }}>{REPO_LABELS[item.repo] || item.repo}</span>
                         <span style={{ fontSize: '10px', color: '#475569' }}>·</span>
                         <span style={{ fontSize: '10px', color: '#64748b' }}>{item.category}</span>
-                        {item.tech_stack?.slice(0, 3).map(t => (
+                        {item.tech_stack?.map(t => (
                           <span key={t} style={{ fontSize: '10px', color: '#475569', background: '#1e293b', padding: '0 4px', borderRadius: '3px' }}>{t}</span>
                         ))}
+                        {(item as any).facets && Object.keys(resolveFacetsLocal((item as any).facets)).length > 0
+                          ? Object.values(resolveFacetsLocal((item as any).facets)).slice(0, 3).map((f: any) =>
+                            f.values.slice(0, 2).map((v: any) => (
+                              <span key={v.code} style={{ fontSize: '9px', color: '#a78bfa', background: '#7c3aed18', padding: '0 4px', borderRadius: '3px', border: '1px solid #7c3aed22' }}>{v.label}</span>
+                            ))
+                          ).flat()
+                          : null}
                       </div>
                     </div>
                   )
@@ -711,6 +779,17 @@ export function ResourceMarket() {
                   <Badge label={REPO_LABELS[selected.repo] || selected.repo} color="#f59e0b" />
                   <Badge label={`★ ${selected.score}`} color={scoreColor(selected.score)} />
                 </div>
+                {(selected as any).facets && Object.keys(resolveFacetsLocal((selected as any).facets)).length > 0 && (
+                  <div style={{ marginBottom: '10px', padding: '8px 10px', background: '#1e293b', borderRadius: '6px', border: '1px solid #334155' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 600, color: '#94a3b8', marginBottom: '6px' }}>多维分类</div>
+                    {Object.entries(resolveFacetsLocal((selected as any).facets)).map(([name, info]: [string, any]) => (
+                      <div key={name} style={{ display: 'flex', gap: '6px', alignItems: 'baseline', marginBottom: '3px', fontSize: '10px' }}>
+                        <span style={{ color: '#64748b', flexShrink: 0, minWidth: '50px' }}>{info.label}:</span>
+                        <span style={{ color: '#a78bfa' }}>{info.values.map((v: any) => v.label).join(', ')}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {selected.source_url && (
                   <div style={{ marginBottom: '8px', fontSize: '11px' }}>
                     <a href={selected.source_url} target="_blank" rel="noreferrer"
@@ -719,15 +798,13 @@ export function ResourceMarket() {
                     </a>
                   </div>
                 )}
-                <div style={{ fontSize: '12px', color: '#e2e8f0', lineHeight: 1.6, marginBottom: '8px', whiteSpace: 'pre-line' }}>
-                  {fmtSummary(selected.summary, selected.summary_en, 500)}
-                </div>
+                <SafeText text={fmtSummary(selected.summary, selected.summary_en)} collapsibleAt={400}
+                  style={{ fontSize: '12px', color: '#e2e8f0', lineHeight: 1.6, marginBottom: '8px', whiteSpace: 'pre-line' }} />
                 {detailBody ? (
                   <div style={{ fontSize: '12px', color: '#cbd5e1', lineHeight: 1.7, whiteSpace: 'pre-wrap',
                     background: '#1e293b', padding: '12px', borderRadius: '8px', border: '1px solid #334155',
                   }}>
-                    {detailBody.slice(0, 3000)}
-                    {detailBody.length > 3000 && <span style={{ color: '#64748b' }}>...(内容截断)</span>}
+                    <SafeText text={detailBody} collapsibleAt={2000} />
                   </div>
                 ) : (
                   <div style={{ fontSize: '11px', color: '#64748b', padding: '20px', textAlign: 'center' }}>加载详情中...</div>
@@ -902,7 +979,7 @@ function CommitPanel({ commitCheck, commitResult, committing, onClose, onCommitA
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                   {st.localChanges.slice(0, 15).map(f => (
                     <span key={f.path} style={{ fontSize: '9px', color: '#94a3b8', background: '#0f172a', padding: '2px 6px', borderRadius: '3px', fontFamily: 'monospace' }}>
-                      [{f.status}] {f.path.slice(0, 60)}
+                      [{f.status}] {f.path}
                     </span>
                   ))}
                   {st.localChanges.length > 15 && <span style={{ fontSize: '9px', color: '#64748b' }}>+{st.localChanges.length - 15} 更多</span>}
@@ -1018,18 +1095,16 @@ function PendingItemCard({ item, onApprove, onRemove, approving }: {
             }}>删除</button>
         </div>
       </div>
-      <div style={{ fontSize: '10px', color: '#94a3b8', lineHeight: 1.4, marginBottom: '4px' }}>
-        {item.summary.slice(0, 150)}
-      </div>
+      <SafeText text={item.summary} collapsibleAt={200}
+        style={{ fontSize: '10px', color: '#94a3b8', lineHeight: 1.4, marginBottom: '4px' }} />
       {item.sourceUrl && (
         <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>
-          来源: <a href={item.sourceUrl} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', textDecoration: 'none' }}>{item.sourceUrl.slice(0, 60)}</a>
+          来源: <a href={item.sourceUrl} target="_blank" rel="noreferrer" style={{ color: '#60a5fa', textDecoration: 'none' }}>{item.sourceUrl}</a>
         </div>
       )}
       {item.status === 'audited' && item.auditNotes && (
-        <div style={{ fontSize: '10px', color: '#94a3b8', background: '#1e293b', padding: '4px 8px', borderRadius: '4px', lineHeight: 1.5, maxHeight: '60px', overflow: 'auto' }}>
-          {item.auditNotes.slice(0, 300)}
-        </div>
+        <SafeText text={item.auditNotes} collapsibleAt={400}
+          style={{ fontSize: '10px', color: '#94a3b8', background: '#1e293b', padding: '4px 8px', borderRadius: '4px', lineHeight: 1.5, maxHeight: '120px', overflow: 'auto' }} />
       )}
     </div>
   )

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import type { WorkflowEvent, WorkflowRunState } from '../../types/workflow'
+import { SafeText } from '../Shared/SafeText'
 import './Workflow.css'
 
 interface MonitorProps {
@@ -88,7 +89,7 @@ export function WorkflowMonitor({ runId, onClose }: MonitorProps) {
                     <span className="wf-result-status">{result.success ? 'OK' : 'FAIL'}</span>
                     <span className="wf-result-duration">{result.durationMs}ms</span>
                   </div>
-                  {result.output && <div className="wf-result-output">{result.output.substring(0, 200)}</div>}
+                  {result.output && <SafeText text={result.output} collapsibleAt={200} className="wf-result-output" />}
                   {result.error && <div className="wf-result-error">{result.error}</div>}
                 </div>
               ))}

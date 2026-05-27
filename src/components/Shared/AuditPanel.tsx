@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useI18n } from '../../i18n'
 import type { AuditEvent } from '../../types/audit'
+import { SafeText } from './SafeText'
 
 interface AuditPanelProps {
   projectPath: string
@@ -192,9 +193,8 @@ export default function AuditPanel({ projectPath }: AuditPanelProps) {
                       </span>
                     </div>
                     {e.metadata?.summary && (
-                      <div style={{ color: '#6b7280', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {String(e.metadata.summary).slice(0, 200)}
-                      </div>
+                      <SafeText text={String(e.metadata.summary)} collapsibleAt={200}
+                        style={{ color: '#6b7280', fontSize: 11 }} />
                     )}
                     {e.target && e.target !== projectPath && (
                       <div style={{ color: '#9ca3af', fontSize: 10 }}>{t.system.target}: {e.target}</div>

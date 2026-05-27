@@ -29,6 +29,7 @@ export interface ResourceItem {
   repo: RepoName
   rawYaml?: Record<string, any>
   body?: string
+  facets?: Record<string, any>
 }
 
 export interface QueryParams {
@@ -61,6 +62,7 @@ interface ManifestItem {
   summary: string
   summary_en?: string
   file: string
+  facets?: Record<string, any>
 }
 
 interface Manifest {
@@ -89,6 +91,9 @@ class ResourceStore {
   private aiManifests: Map<RepoName, ManifestItem[]> = new Map()
   private aiIndexes: Map<RepoName, ManifestItem[]> = new Map()
   private resourceDir: string
+  private _lastLoadTime = 0
+  private _localChangesCache: Map<string, { time: number; data: Array<{ path: string; status: string }> }> = new Map()
+  private _changesCacheTTL = 3000
 
   constructor() {
     this.resourceDir = getResourceDir()
@@ -111,6 +116,8 @@ class ResourceStore {
 
   /** 自动同步所有已克隆仓库到最新，然后重载 manifest */
   async autoSyncAll(): Promise<{ synced: RepoName[]; message: string }> {
+    // 先确保内存索引已加载，避免和前端 resource:list 的 ensureManifestsLoaded 竞态
+    await this.ensureManifestsLoaded()
     const synced: RepoName[] = []
     for (const repo of REPO_NAMES) {
       const repoPath = getRepoPath(repo)
@@ -133,7 +140,18 @@ class ResourceStore {
 
   /** 确保 manifest 已加载到内存（即使 isInitialized 为 true 但内存可能为空） */
   async ensureManifestsLoaded(): Promise<void> {
-    if (this.manifests.size === 0 && this.isInitialized()) {
+    if (!this.isInitialized()) return
+    // 用 manifests Map 检查覆盖（manifest.json 总是存在，不依赖 aiIndexes 可能为空）
+    const diskRepos = REPO_NAMES.filter(r => fs.existsSync(path.join(getRepoPath(r), 'manifest.json')))
+    const loadedRepos = REPO_NAMES.filter(r => this.manifests.has(r))
+    if (loadedRepos.length < diskRepos.length) {
+      // 防抖：5 秒内不重复加载
+      const now = Date.now()
+      if (now - this._lastLoadTime < 5000) {
+        console.log('[ensureManifestsLoaded] 距上次加载不足 5 秒，跳过')
+        return
+      }
+      console.log('[ensureManifestsLoaded] 磁盘有', diskRepos.length, '个仓库，内存仅加载', loadedRepos.length, '个，重新加载')
       await this.loadManifests()
     }
   }
@@ -155,14 +173,21 @@ class ResourceStore {
           const raw = await fs.readFile(aiManifestPath, 'utf-8')
           const parsed = JSON.parse(raw)
           this.aiManifests.set(repo, parsed.items || [])
-          // 缓存 AI 索引用于快速匹配
           this.aiIndexes.set(repo, parsed.items || [])
+        } else if (this.manifests.has(repo)) {
+          // manifest.json 存在但 manifest.ai.json 不存在：从 manifest.json 同步索引
+          const mf = this.manifests.get(repo)!
+          const items = mf.items as ManifestItem[] || []
+          this.aiIndexes.set(repo, items)
+          this.aiManifests.set(repo, items)
         }
       } catch {
         // 某个仓库不存在不影响其他
       }
     }
 
+    this._lastLoadTime = Date.now()
+    this._localChangesCache.clear()
     this.initialized = true
     return true
   }
@@ -269,10 +294,12 @@ class ResourceStore {
             const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
             if (fmMatch) {
               item.body = fmMatch[2] || ''
-              // 从 YAML 读取 summary_en（manifest 可能还没更新）
-              if (!item.summary_en) {
-                const fm = yaml.load(fmMatch[1]) as Record<string, any> | null
-                if (fm?.summary_en) item.summary_en = String(fm.summary_en).replace(/\s+/g, ' ').trim()
+              // 从 YAML 读取补充字段（manifest 可能还没更新）
+              const fm = yaml.load(fmMatch[1]) as Record<string, any> | null
+              if (fm) {
+                if (!item.summary_en && fm.summary_en) item.summary_en = String(fm.summary_en).replace(/\s+/g, ' ').trim()
+                if (!item.facets && fm.facets) item.facets = fm.facets as Record<string, any>
+                item.rawYaml = fm
               }
             } else {
               item.body = raw
@@ -304,9 +331,10 @@ class ResourceStore {
 
   /** 用户添加资源：接收标准化后的资源对象，写入本地仓库 */
   async addResource(resource: Omit<ResourceItem, 'file'> & { content: string }, repo: RepoName): Promise<{ success: boolean; path?: string }> {
+    console.log('[addResource] 写入:', resource.name, '->', repo, resource.type, resource.category)
     const repoPath = getRepoPath(repo)
     if (!fs.existsSync(repoPath)) {
-      return { success: false }
+      console.log('[addResource] 仓库目录不存在:', repoPath); return { success: false }
     }
 
     // 确定目录
@@ -338,12 +366,40 @@ class ResourceStore {
       created: new Date().toISOString().slice(0, 10),
       updated: new Date().toISOString().slice(0, 10),
       summary: resource.summary || '',
+      facets: resource.facets || {},
     })
     const content = `---\n${yamlBlock}---\n\n${resource.content || ''}`
     await fs.writeFile(filePath, content, 'utf-8')
+    console.log('[addResource] 文件已写入:', filePath)
 
-    // 刷新内存中的 manifest（简化：直接重载）
-    await this.loadManifests()
+    // 直接更新内存索引，避免依赖可能过期的 manifest.json
+    const relFile = path.relative(repoPath, filePath).replace(/\\/g, '/')
+    const manifestItem: ManifestItem = {
+      id: resource.id,
+      name: resource.name,
+      type: resource.type,
+      category: resource.category,
+      tech_stack: resource.tech_stack || [],
+      style_tags: resource.style_tags || [],
+      score: resource.score || 3.0,
+      rating_count: 1,
+      source_url: resource.source_url || '',
+      summary: resource.summary || '',
+      file: relFile,
+      facets: resource.facets || {},
+    }
+    // 更新 aiIndexes
+    const aiItems = this.aiIndexes.get(repo) || []
+    aiItems.push(manifestItem)
+    this.aiIndexes.set(repo, aiItems)
+    // 更新 manifests
+    const mf = this.manifests.get(repo)
+    if (mf) {
+      mf.items.push(manifestItem)
+      mf.total = mf.items.length
+      mf.updated = new Date().toISOString()
+    }
+    console.log('[addResource] 索引已更新:', resource.name, '->', repo, '当前索引数:', aiItems.length)
 
     return { success: true, path: filePath }
   }
@@ -511,18 +567,21 @@ class ResourceStore {
 
   // ============ 贡献流程 ============
 
-  /** 获取本地变更文件列表（git status） */
+  /** 获取本地变更文件列表（git status）— 带短期缓存避免重复调用 */
   async getLocalChanges(repo: RepoName): Promise<Array<{ path: string; status: string }>> {
     const repoPath = getRepoPath(repo)
     if (!fs.existsSync(path.join(repoPath, '.git'))) return []
 
+    // 检查缓存
+    const cached = this._localChangesCache.get(repo)
+    if (cached && Date.now() - cached.time < this._changesCacheTTL) return cached.data
+
     try {
       const { execSync } = await import('child_process')
       const output = execSync('git status --porcelain', { cwd: repoPath, encoding: 'utf-8', timeout: 10000 })
-      return output.trim().split('\n').filter(Boolean).map(line => {
+      const raw = output.trim().split('\n').filter(Boolean).map(line => {
         const status = line.slice(0, 2).trim()
         let filePath = line.slice(3).trim()
-        // 还原 git C-style 转义路径 (含空格等特殊字符时自动添加双引号)
         if (filePath.startsWith('"') && filePath.endsWith('"')) {
           filePath = filePath.slice(1, -1)
             .replace(/\\t/g, '\t')
@@ -532,7 +591,34 @@ class ResourceStore {
         }
         return { path: filePath, status }
       })
-    } catch {
+
+      const expanded: Array<{ path: string; status: string }> = []
+      for (const entry of raw) {
+        if (entry.path.endsWith('/') || entry.path.endsWith('\\')) {
+          const dirPath = entry.path.replace(/[/\\]$/, '')
+          const absDir = path.join(repoPath, dirPath)
+          try {
+            const walkDir = (dir: string, base: string) => {
+              const entries = fs.readdirSync(dir, { withFileTypes: true })
+              for (const e of entries) {
+                const rel = base ? `${base}/${e.name}` : e.name
+                if (e.isDirectory()) {
+                  walkDir(path.join(dir, e.name), rel)
+                } else {
+                  expanded.push({ path: rel, status: entry.status })
+                }
+              }
+            }
+            walkDir(absDir, dirPath)
+          } catch { /* 目录读取失败则跳过 */ }
+        } else {
+          expanded.push(entry)
+        }
+      }
+      this._localChangesCache.set(repo, { time: Date.now(), data: expanded })
+      return expanded
+    } catch (e) {
+      console.log("[getLocalChanges]", repo, "error:", e)
       return []
     }
   }
@@ -633,6 +719,51 @@ class ResourceStore {
     }
 
     return { valid: errors.length === 0, errors, newFiles, blockedFiles }
+  }
+
+  /** 基础 YAML 校验：仅检查变更 .md 文件的必填字段，不阻止修改/删除 */
+  async validateCommitYaml(repo: RepoName): Promise<{
+    valid: boolean
+    errors: string[]
+    filesToCommit: Array<{ path: string; status: string }>
+  }> {
+    const errors: string[] = []
+    const allChanges = await this.getLocalChanges(repo)
+
+    if (allChanges.length === 0) {
+      return { valid: true, errors: [], filesToCommit: [] }
+    }
+
+    for (const change of allChanges) {
+      if (!change.path.endsWith('.md')) continue
+      const yamlResult = await this.validateNewFileYaml(repo, change.path)
+      if (!yamlResult.valid) {
+        errors.push(...yamlResult.errors)
+      }
+    }
+
+    return { valid: errors.length === 0, errors, filesToCommit: allChanges }
+  }
+
+  /** 全部提交：git add --all + commit（不做范围限制） */
+  async commitAll(repo: RepoName, message: string): Promise<{ success: boolean; message: string }> {
+    if (!await this.isGitRepo(repo)) {
+      return { success: false, message: '不是 Git 仓库' }
+    }
+
+    const changes = await this.getLocalChanges(repo)
+    if (changes.length === 0) {
+      return { success: false, message: '没有需要提交的变更' }
+    }
+
+    const addR = await this.gitSilent(repo, 'add --all')
+    if (!addR.ok) return { success: false, message: `Git add 失败: ${addR.output}` }
+
+    const escaped = message.replace(/"/g, '\\"')
+    const commitR = await this.gitSilent(repo, `commit -m "${escaped}"`)
+    if (!commitR.ok) return { success: false, message: `提交失败: ${commitR.output}` }
+
+    return { success: true, message: `提交成功 (${changes.length} 个文件)` }
   }
 
   /** 创建贡献分支 */
@@ -918,10 +1049,11 @@ class ResourceStore {
       summary_en: item.summary_en,
       file: item.file || '',
       repo,
+      facets: item.facets,
     }
   }
 
-  private getTypeDir(repo: RepoName, type: string): string {
+  getTypeDir(repo: RepoName, type: string): string {
     if (repo === 'DeepBluePrompt') return 'prompts'
     if (repo === 'DeepBlueCase') return type === 'template' ? 'templates' : 'cases'
     if (repo === 'DeepBlueKit') {

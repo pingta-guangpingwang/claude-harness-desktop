@@ -67,6 +67,8 @@ export class WindowManager {
     })
 
     this.mainWindow.on('close', (e) => {
+      // 开发模式下直接退出，避免遗留进程导致下次启动需 taskkill
+      if (process.env.NODE_ENV === 'development') return
       // 如果设置了最小化到托盘，则不关闭，只隐藏
       if (this.shouldMinimizeToTray) {
         e.preventDefault()

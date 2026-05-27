@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useI18n } from '../../i18n'
 import { useHFContext, type Project, type ProjectMetadata } from '../../context/HFContext'
+import { SafeText } from '../Shared/SafeText'
 
 const RATING_COLORS = ['#22c55e', '#16a34a', '#eab308', '#f59e0b', '#ef4444', '#dc2626']
 const BORDER_COLORS = ['#e5e7eb', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
@@ -288,7 +289,7 @@ export default function ProjectSelector() {
             title={notes || t.selector.notesPlaceholder}
           >
             {notes
-              ? notes.replace(/\n/g, ' ').slice(0, 80) + (notes.length > 80 ? '...' : '')
+              ? <SafeText text={notes.replace(/\n/g, ' ')} collapsibleAt={80} />
               : <span className="notes-placeholder">{t.selector.notesPlaceholder}</span>
             }
           </div>

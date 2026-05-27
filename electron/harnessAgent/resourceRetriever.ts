@@ -124,6 +124,7 @@ export const searchResourcesTool: AgentTool = {
       return { success: true, output: '资源仓库未初始化。请先在资源市场面板中同步官方仓库。' }
     }
 
+    await resourceStore.ensureManifestsLoaded()
     const resources = resourceStore.queryResources({
       query,
       type: resourceType === 'all' ? undefined : resourceType,
@@ -167,6 +168,7 @@ export const addResourceTool: AgentTool = {
       return { success: false, output: '资源仓库未初始化。请先在资源市场面板中同步官方仓库。' }
     }
 
+    await resourceStore.ensureManifestsLoaded()
     const id = `${(params.resource_type as string).slice(0, 6)}-user-${Date.now().toString(36)}`
     const rawCat = (params.category as string) || 'other'
     const cleanCat = rawCat.split(/[,，、]/)[0].trim().slice(0, 30) || 'other'
@@ -215,6 +217,7 @@ export const listResourcesTool: AgentTool = {
       return { success: true, output: '资源仓库未初始化。' }
     }
 
+    await resourceStore.ensureManifestsLoaded()
     const resources = resourceStore.filterResources({
       repo: params.repo as any,
       type: params.resource_type as string,

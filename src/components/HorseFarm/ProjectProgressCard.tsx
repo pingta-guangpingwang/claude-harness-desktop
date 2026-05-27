@@ -3,6 +3,7 @@ import { useI18n } from '../../i18n'
 import type { HorseFarmProject, HFTask } from '../../types/horseFarm'
 import type { Project } from '../../context/HFContext'
 import type { InitProgress } from './HorseFarm'
+import { SafeText } from '../Shared/SafeText'
 import type { ProjectPtyStatus } from '../../context/ChatContext'
 import PreProjectWorkflow from './PreProjectWorkflow'
 import TaskTracker from './TaskTracker'
@@ -108,8 +109,6 @@ export default function ProjectProgressCard({
     }
   }, [hfProject.projectPath, notesDraft])
 
-  const notesShort = notes.length > 120 ? notes.slice(0, 120) + '...' : notes
-
   return (
     <>
       <div
@@ -170,7 +169,7 @@ export default function ProjectProgressCard({
                 userSelect: 'none',
               }}
             >
-              {notes ? notesShort : '💬 ' + t.horseFarm.notesPlaceholder}
+              {notes ? <SafeText text={notes} collapsibleAt={120} /> : '💬 ' + t.horseFarm.notesPlaceholder}
             </div>
             {notes && notes.length > 120 && (
               <button

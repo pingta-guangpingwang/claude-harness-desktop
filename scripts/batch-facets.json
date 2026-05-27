@@ -1,0 +1,47 @@
+{
+  "DeepBluePrompt": {
+    "prompts/code-quality/naming-conventions.md": {"role":["R010","R011"],"domain":["D010"],"task":["T080"],"tech":["K011"],"paradigm":["P064"],"format":["F053"],"level":["L030"]},
+    "prompts/code-quality/react-best-practices.md": {"role":["R010"],"domain":["D010"],"task":["T072"],"tech":["K030","K011"],"paradigm":["P064"],"format":["F053"],"level":["L030"]},
+    "prompts/interaction/animation-transition.md": {"role":["R010","R040","R043"],"domain":["D010"],"task":["T053"],"tech":["K030"],"paradigm":["P043"],"format":["F010"],"level":["L033"]},
+    "prompts/interaction/form-validation.md": {"role":["R010"],"domain":["D010"],"task":["T054"],"tech":["K030","K011"],"paradigm":["P042"],"format":["F010"],"level":["L030"]},
+    "prompts/style-presets/business-pro.md": {"role":["R010","R040"],"domain":["D091"],"task":["T053"],"tech":["K030","K011"],"paradigm":["P043"],"format":["F010"],"level":["L030"]},
+    "prompts/style-presets/cyberpunk-tech.md": {"role":["R010","R040"],"domain":["D080"],"task":["T053"],"tech":["K030"],"paradigm":["P043"],"format":["F010"],"level":["L030"]},
+    "prompts/style-presets/minimal-clean.md": {"role":["R010","R040"],"domain":["D010"],"task":["T053"],"tech":["K030","K011"],"paradigm":["P043"],"format":["F010"],"level":["L030"]},
+    "prompts/ui-design/color-theme-dark.md": {"role":["R010","R040"],"domain":["D010"],"task":["T053"],"tech":["K030"],"paradigm":["P043"],"format":["F010"],"level":["L020"]},
+    "prompts/ui-design/layout-responsive.md": {"role":["R010","R040"],"domain":["D010"],"task":["T053"],"tech":["K030","K011"],"paradigm":["P043"],"format":["F010"],"level":["L030"]}
+  },
+  "DeepBlueKit": {
+    "agent-frameworks/autogen.md": {"role":["R031","R032"],"domain":["D031"],"task":["T010"],"tech":["K012","K096"],"paradigm":["P084"],"format":["F023"],"level":["L040"]},
+    "agent-frameworks/crewai.md": {"role":["R031","R032"],"domain":["D031"],"task":["T010"],"tech":["K012","K092","K096","K097"],"paradigm":["P084"],"format":["F023"],"level":["L040"]},
+    "agent-frameworks/dify.md": {"role":["R031","R032","R050"],"domain":["D031"],"task":["T010"],"tech":["K012","K030","K011","K070","K073"],"paradigm":["P080","P084"],"format":["F021"],"level":["L030"]},
+    "agent-frameworks/langgraph.md": {"role":["R031","R032","R011"],"domain":["D031"],"task":["T050"],"tech":["K012","K011","K092","K096","K097"],"paradigm":["P084"],"format":["F023"],"level":["L040"]},
+    "ai-assistants/aider.md": {"role":["R010","R011","R012"],"domain":["D010","D030"],"task":["T010"],"tech":["K012","K096","K097","K100"],"paradigm":["P084"],"format":["F022"],"level":["L033"]},
+    "ai-assistants/cline-roocode.md": {"role":["R010","R011","R012"],"domain":["D010"],"task":["T010"],"tech":["K011","K102","K096","K097"],"paradigm":["P084"],"format":["F022"],"level":["L033"]},
+    "ai-assistants/continue-dev.md": {"role":["R010","R011","R012"],"domain":["D010"],"task":["T010"],"tech":["K011","K030","K040","K102"],"paradigm":["P084"],"format":["F022"],"level":["L030"]},
+    "mcp-servers/brave-search-server.md": {"role":["R011","R020"],"domain":["D030"],"task":["T010"],"tech":["K011","K040"],"paradigm":["P084"],"format":["F022"],"level":["L030"]},
+    "mcp-servers/filesystem-server.md": {"role":["R011","R020"],"domain":["D010"],"task":["T010"],"tech":["K011","K040"],"paradigm":["P084"],"format":["F022"],"level":["L020"]},
+    "mcp-servers/github-server.md": {"role":["R020","R011"],"domain":["D060"],"task":["T010"],"tech":["K011","K040","K100"],"paradigm":["P084"],"format":["F022"],"level":["L030"]},
+    "mcp-servers/postgres-server.md": {"role":["R030","R011"],"domain":["D040"],"task":["T010"],"tech":["K011","K040","K070"],"paradigm":["P084"],"format":["F022"],"level":["L030"]},
+    "mcp-servers/puppeteer-server.md": {"role":["R070","R010"],"domain":["D010"],"task":["T010"],"tech":["K011","K040","K030"],"paradigm":["P084"],"format":["F022"],"level":["L030"]},
+    "plugins/eslint-config-collection.md": {"role":["R010","R011"],"domain":["D010"],"task":["T080"],"tech":["K010","K011","K030","K040"],"paradigm":["P064"],"format":["F053"],"level":["L030"]},
+    "plugins/vscode-extensions-list.md": {"role":["R010","R011","R012"],"domain":["D010"],"task":["T060"],"tech":["K010","K011","K030","K040","K102"],"paradigm":["P064"],"format":["F050"],"level":["L020"]},
+    "skills/code-review-skill.md": {"role":["R010","R011"],"domain":["D010"],"task":["T021"],"tech":["K011","K097","K100"],"paradigm":["P084"],"format":["F022"],"level":["L033"]},
+    "skills/database-migration-skill.md": {"role":["R011","R030"],"domain":["D010","D040"],"task":["T030"],"tech":["K070","K071","K074"],"paradigm":["P064"],"format":["F022"],"level":["L040"]},
+    "tools/api-mock-servers.md": {"role":["R010","R070"],"domain":["D010"],"task":["T016"],"tech":["K010","K011","K040"],"paradigm":["P030"],"format":["F050"],"level":["L020"]},
+    "tools/build-tools-index.md": {"role":["R010","R011"],"domain":["D010"],"task":["T060"],"tech":["K010","K011","K030","K031","K040"],"paradigm":["P064"],"format":["F050"],"level":["L033"]},
+    "tools/CLI/pend-mpm3rhyr.md": {"role":["R011","R010"],"domain":["D010"],"task":["T011"],"tech":["K011","K010","K040"],"paradigm":["P064"],"format":["F023"],"level":["L020"]},
+    "tools/CLI/tool-user-mpm3s0od.md": {"role":["R011","R010"],"domain":["D010"],"task":["T011"],"tech":["K011","K010","K040"],"paradigm":["P064"],"format":["F023"],"level":["L020"]},
+    "tools/CLI/tool-user-mpmibrhk.md": {"role":["R011","R010"],"domain":["D010"],"task":["T011"],"tech":["K011","K010","K040"],"paradigm":["P064"],"format":["F023"],"level":["L020"]}
+  },
+  "DeepBlueIdentity": {
+    "identities/ai-ml/ai-prompt-engineer.md": {"role":["R032"],"domain":["D031"],"task":["T010"],"tech":["K012","K096","K097"],"paradigm":["P081","P082"],"format":["F011"],"level":["L033"]},
+    "identities/backend/senior-python-backend.md": {"role":["R011"],"domain":["D010"],"task":["T010"],"tech":["K012","K044","K045","K046","K070","K073","K080"],"paradigm":["P013","P030"],"format":["F011"],"level":["L040"]},
+    "identities/data/data-analyst.md": {"role":["R033"],"domain":["D040"],"task":["T010"],"tech":["K012","K070","K022"],"paradigm":["P041"],"format":["F011"],"level":["L030"]},
+    "identities/data/database-administrator.md": {"role":["R030"],"domain":["D040"],"task":["T052"],"tech":["K070","K071","K072","K073","K022"],"paradigm":["P064"],"format":["F011"],"level":["L040"]},
+    "identities/devops/devops-engineer.md": {"role":["R020"],"domain":["D060"],"task":["T010"],"tech":["K080","K081","K101","K087"],"paradigm":["P013"],"format":["F011"],"level":["L040"]},
+    "identities/frontend/react-frontend-expert.md": {"role":["R010"],"domain":["D010"],"task":["T010"],"tech":["K030","K011","K034","K031"],"paradigm":["P011","P043"],"format":["F011"],"level":["L033"]},
+    "identities/fullstack/fullstack-developer.md": {"role":["R012"],"domain":["D010"],"task":["T010"],"tech":["K030","K011","K012","K040","K070","K080","K034"],"paradigm":["P013"],"format":["F011"],"level":["L033"]},
+    "identities/security/security-auditor.md": {"role":["R022"],"domain":["D010"],"task":["T081"],"tech":["K012","K010","K022","K080"],"paradigm":["P064"],"format":["F011"],"level":["L040"]},
+    "identities/writing/technical-writer.md": {"role":["R053"],"domain":["D010"],"task":["T015"],"tech":["K104","K100"],"paradigm":["P064"],"format":["F011"],"level":["L020"]}
+  }
+}

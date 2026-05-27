@@ -32,6 +32,11 @@ export interface ElectronAPI {
   resourceContributePR: (repo: string, branchName: string, title: string, body: string) => Promise<{ success: boolean; message: string; url?: string }>
   resourceClone: (repo: string, remoteUrl?: string) => Promise<{ success: boolean; message: string }>
   resourceAutoSync: () => Promise<{ synced: string[]; message: string }>
+  // Taxonomy（分面分类体系）
+  taxonomyFacets: () => Promise<any>
+  taxonomyResolve: (facets: any) => Promise<any>
+  taxonomyExpand: (facets: any) => Promise<string>
+  taxonomyLabel: (code: string) => Promise<string>
   // Pending Resource Review
   pendingList: () => Promise<{ success: boolean; items: Array<{
     id: string; name: string; resourceType: string; targetRepo: string
@@ -43,6 +48,7 @@ export interface ElectronAPI {
   pendingRemove: (id: string) => Promise<{ success: boolean; error?: string }>
   pendingUpdate: (id: string, updates: any) => Promise<{ success: boolean; error?: string }>
   pendingCount: () => Promise<{ success: boolean; count: number; error?: string }>
+  pendingCleanup: () => Promise<{ success: boolean; cleaned: string[]; error?: string }>
   pendingApprove: (id: string) => Promise<{ success: boolean; path?: string; error?: string }>
   pendingApproveAll: (repo?: string) => Promise<{ success: boolean; results: Array<{ id: string; name: string; success: boolean; message: string }>; error?: string }>
   pendingAuditAll: () => Promise<{ success: boolean; results?: Array<{ id: string; name: string; success: boolean; score: number; message: string }>; message?: string; error?: string }>

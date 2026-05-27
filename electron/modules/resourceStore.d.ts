@@ -18,6 +18,7 @@ export interface ResourceItem {
     repo: RepoName;
     rawYaml?: Record<string, any>;
     body?: string;
+    facets?: Record<string, any>;
 }
 export interface QueryParams {
     query: string;
@@ -40,6 +41,9 @@ declare class ResourceStore {
     private aiManifests;
     private aiIndexes;
     private resourceDir;
+    private _lastLoadTime;
+    private _localChangesCache;
+    private _changesCacheTTL;
     constructor();
     /** 检查资源目录是否存在且已初始化 */
     isInitialized(): boolean;
@@ -118,7 +122,7 @@ declare class ResourceStore {
         success: boolean;
         message: string;
     }>;
-    /** 获取本地变更文件列表（git status） */
+    /** 获取本地变更文件列表（git status）— 带短期缓存避免重复调用 */
     getLocalChanges(repo: RepoName): Promise<Array<{
         path: string;
         status: string;
@@ -151,6 +155,20 @@ declare class ResourceStore {
             path: string;
             status: string;
         }>;
+    }>;
+    /** 基础 YAML 校验：仅检查变更 .md 文件的必填字段，不阻止修改/删除 */
+    validateCommitYaml(repo: RepoName): Promise<{
+        valid: boolean;
+        errors: string[];
+        filesToCommit: Array<{
+            path: string;
+            status: string;
+        }>;
+    }>;
+    /** 全部提交：git add --all + commit（不做范围限制） */
+    commitAll(repo: RepoName, message: string): Promise<{
+        success: boolean;
+        message: string;
     }>;
     /** 创建贡献分支 */
     createContributionBranch(repo: RepoName, branchName: string): Promise<{
@@ -196,7 +214,7 @@ declare class ResourceStore {
     getLeaderboard(category?: string, limit?: number): ResourceItem[];
     private matchesFilters;
     private toResourceItem;
-    private getTypeDir;
+    getTypeDir(repo: RepoName, type: string): string;
 }
 export declare const resourceStore: ResourceStore;
 export {};

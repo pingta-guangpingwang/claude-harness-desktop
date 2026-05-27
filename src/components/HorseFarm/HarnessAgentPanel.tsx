@@ -3,6 +3,7 @@ import { useChat } from '../../context/ChatContext'
 import { useI18n } from '../../i18n'
 import type { HorseFarmProject, HFConfig } from '../../types/horseFarm'
 import { getLogs, addLog as addStoreLog, appendLastAiText, clearLogs, loadLogs, subscribe, getAgentRunning, subscribeAgentRunning, setAgentRunning, type LogEntry } from './harnessChatStore'
+import { SafeText } from '../Shared/SafeText'
 
 interface HarnessAgentPanelProps {
   projectIds: string[]
@@ -523,7 +524,7 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
       }
       // res.success 非 queued 时 finalMessage 已通过 'done' 事件处理
     } catch (err) {
-      addStoreLog({ type: 'ai-error', text: `Agent 调用失败: ${String(err).slice(0, 120)}` })
+      addStoreLog({ type: 'ai-error', text: `Agent 调用失败: ${String(err)}` })
       if (!wasRunning) {
         setAiThinking(false)
         setAgentRunning(false)
@@ -950,7 +951,7 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
                     >
                       <span style={{ fontWeight: 600 }}>/{cmd.label}</span>
                       <span style={{ color: 'var(--app-text-tertiary)', marginLeft: 8, fontSize: 10 }}>
-                        {cmd.text.slice(0, 60)}{cmd.text.length > 60 ? '…' : ''}
+                        <SafeText text={cmd.text} collapsibleAt={60} inline />
                       </span>
                     </div>
                   ))}
@@ -1074,7 +1075,7 @@ export const HarnessAgentPanel: React.FC<HarnessAgentPanelProps> = ({ projectIds
                     }}>
                       <span style={{ fontWeight: 600, color: '#6366f1' }}>/{cmd.label}</span>
                       <span style={{ flex: 1, color: 'var(--app-text-secondary)' }}>
-                        → {cmd.text.slice(0, 50)}{cmd.text.length > 50 ? '…' : ''}
+                        → <SafeText text={cmd.text} collapsibleAt={50} inline />
                       </span>
                       <button
                         onClick={() => setCustomCommands(prev => prev.filter((_, j) => j !== i))}

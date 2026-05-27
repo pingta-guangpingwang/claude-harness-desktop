@@ -73,12 +73,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resourceClone: (repo: string, remoteUrl?: string) => ipcRenderer.invoke('resource:clone', repo, remoteUrl),
   resourceAutoSync: () => ipcRenderer.invoke('resource:auto-sync'),
 
+  // ============ Taxonomy（分面分类体系） ============
+  taxonomyFacets: () => ipcRenderer.invoke('taxonomy:facets'),
+  taxonomyResolve: (facets: any) => ipcRenderer.invoke('taxonomy:resolve', facets),
+  taxonomyExpand: (facets: any) => ipcRenderer.invoke('taxonomy:expand', facets),
+  taxonomyLabel: (code: string) => ipcRenderer.invoke('taxonomy:label', code),
+
   // ============ Pending Resource Review ============
   pendingList: () => ipcRenderer.invoke('pending:list'),
   pendingAdd: (item: any) => ipcRenderer.invoke('pending:add', item),
   pendingRemove: (id: string) => ipcRenderer.invoke('pending:remove', id),
   pendingUpdate: (id: string, updates: any) => ipcRenderer.invoke('pending:update', id, updates),
   pendingCount: () => ipcRenderer.invoke('pending:count'),
+  pendingCleanup: () => ipcRenderer.invoke('pending:cleanup'),
   pendingApprove: (id: string) => ipcRenderer.invoke('pending:approve', id),
   pendingApproveAll: (repo?: string) => ipcRenderer.invoke('pending:approve-all', repo),
   pendingAuditAll: () => ipcRenderer.invoke('pending:audit-all'),

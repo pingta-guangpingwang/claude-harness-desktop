@@ -34,6 +34,9 @@ import { db } from './modules/database.js'
 const preloadPath = path.join(__dirname, 'preload.js')
 setPreloadPath(preloadPath)
 
+// 抑制 Chromium GPU 命令缓冲区错误（Windows 显卡驱动兼容性问题，不影响功能）
+app.commandLine.appendSwitch('disable-gpu-sandbox')
+
 let mainWindow: BrowserWindow | null = null
 
 async function initializeApp() {
@@ -212,48 +215,55 @@ async function startMiddlewareBox() {
 
 // ---- App 生命周期 ----
 
-app.whenReady().then(async () => {
-  await initializeApp()
-})
+// 防止多个实例 — 必须在 app.whenReady 之前检查
+const MY_PID = process.pid
+console.log('[CHD] 进程启动 PID=', MY_PID)
 
-// 关闭到托盘而非退出
-app.on('window-all-closed', () => {
-  // 不退出，由托盘管理
-})
+const gotLock = app.requestSingleInstanceLock()
+console.log('[CHD] 单实例锁:', gotLock ? '已获取' : '未获取', 'PID=', MY_PID)
 
-app.on('activate', () => {
-  // macOS dock 点击 → 显示窗口
+if (!gotLock) {
+  console.log('[CHD] 已有实例运行中，本进程退出 PID=', MY_PID)
+  // 不杀进程、不 relaunch — 已运行实例的 second-instance 事件会唤出窗口
+  app.exit(0)
+}
+
+app.on('second-instance', () => {
+  console.log('[CHD] 收到 second-instance 事件，显示主窗口 PID=', MY_PID)
   windowManager.showMainWindow()
 })
 
-// 真正退出前的清理
+app.whenReady().then(async () => {
+  console.log('[CHD] app.whenReady 开始初始化 PID=', MY_PID)
+  await initializeApp()
+})
+
+// Ctrl+C / SIGTERM：先 quit 释放单实例锁，若被 tray 阻止则 force exit
+const forceExit = (sig: string) => process.on(sig, () => {
+  console.log('[CHD] 收到', sig, '信号，退出')
+  app.quit()
+  // 给 quit 一个短暂窗口，若 tray 阻止则强制退出
+  setTimeout(() => { console.log('[CHD] quit 超时，强制退出'); app.exit(0) }, 2000)
+})
+forceExit('SIGINT')
+forceExit('SIGTERM')
+forceExit('SIGHUP')
+
+// 关闭窗口时彻底退出进程
+app.on('window-all-closed', () => {
+  console.log('[CHD] 所有窗口已关闭，退出进程')
+  app.quit()
+})
+
+app.on('activate', () => {
+  windowManager.showMainWindow()
+})
+
+// 退出前清理
 app.on('before-quit', () => {
   hotkeyManager.destroy()
   trayManager.destroy()
 })
-
-// 防止多个实例 — 自动杀掉旧实例后重启
-const gotLock = app.requestSingleInstanceLock()
-if (!gotLock) {
-  console.log('[CHD] ⚠️ 检测到已有实例在运行，正在关闭旧进程并重启...')
-  try {
-    const { execSync } = require('child_process')
-    // 杀掉所有其他 electron.exe 进程
-    execSync(`taskkill /F /IM electron.exe /FI "PID ne ${process.pid}"`, { timeout: 10000 })
-  } catch (e: any) {
-    // taskkill 没有匹配进程时会返回非零，忽略
-  }
-  // 等旧进程释放锁后重新启动
-  setTimeout(() => {
-    app.relaunch()
-    app.exit()
-  }, 500)
-} else {
-  app.on('second-instance', () => {
-    console.log('[CHD] 收到 second-instance 事件，显示主窗口')
-    windowManager.showMainWindow()
-  })
-}
 
 // 全局异常捕获 — 防止未处理的异常导致静默退出
 process.on('uncaughtException', (err) => {
