@@ -30,14 +30,12 @@ export interface TaxonomyData {
 }
 
 export interface ResourceFacets {
-  role?: string[]
-  domain?: string[]
-  task?: string
-  tech?: string[]
-  paradigm?: string[]
+  occupation?: string[]
+  skill?: string[]
+  knowledge?: string[]
+  transversal?: string[]
   format?: string
   level?: string
-  quality?: string[]
   [key: string]: any
 }
 
@@ -140,6 +138,20 @@ class TaxonomyStore {
     return parts.join(' ')
   }
 
+  /** 获取某个维度下指定编码的子节点 */
+  getChildren(facetName: string, parentCode: string): FacetValue[] {
+    const facet = this.data.facets[facetName]
+    if (!facet) return []
+    return facet.values.filter(v => v.parents.includes(parentCode))
+  }
+
+  /** 获取某个维度的根节点（无 parents 或 parents 为空） */
+  getRoots(facetName: string): FacetValue[] {
+    const facet = this.data.facets[facetName]
+    if (!facet) return []
+    return facet.values.filter(v => !v.parents || v.parents.length === 0)
+  }
+
   /** 将 facets 编码转换为标签展示结构 */
   resolve(facets: ResourceFacets | null | undefined): Record<string, { label: string; values: Array<{ code: string; label: string }> }> {
     const result: Record<string, { label: string; values: Array<{ code: string; label: string }> }> = {}
@@ -148,8 +160,10 @@ class TaxonomyStore {
       const codes = facets[name]
       if (!codes) continue
       const arr = Array.isArray(codes) ? codes : [codes]
-      if (arr.length === 0 || (arr.length === 1 && (arr[0] === 'L000' || arr[0] === 'Q000' || arr[0] === 'P000' || arr[0] === 'K000' || arr[0] === 'D000' || arr[0] === 'R000'))) continue
-      const values = arr.filter(c => c !== '000' && !c.endsWith('000')).map(c => ({ code: c, label: this.getLabel(c) }))
+      if (arr.length === 0) continue
+      const isGeneric = (c: string) => c === 'S000' || c === 'T000' || c === 'K000' || c === 'O000' || c === 'F000' || c === 'L000'
+      if (arr.length === 1 && isGeneric(arr[0])) continue
+      const values = arr.filter(c => !c.endsWith('000')).map(c => ({ code: c, label: this.getLabel(c) }))
       if (values.length > 0) {
         result[name] = { label: def.label, values }
       }

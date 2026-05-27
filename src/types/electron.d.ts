@@ -37,6 +37,8 @@ export interface ElectronAPI {
   taxonomyResolve: (facets: any) => Promise<any>
   taxonomyExpand: (facets: any) => Promise<string>
   taxonomyLabel: (code: string) => Promise<string>
+  taxonomyChildren: (facetName: string, parentCode: string) => Promise<Array<{ code: string; label: string; parents: string[]; aliases: string[] }>>
+  taxonomyRoots: (facetName: string) => Promise<Array<{ code: string; label: string; parents: string[]; aliases: string[] }>>
   // Pending Resource Review
   pendingList: () => Promise<{ success: boolean; items: Array<{
     id: string; name: string; resourceType: string; targetRepo: string

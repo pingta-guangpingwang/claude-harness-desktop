@@ -28,13 +28,19 @@ function applyFacetsToFile(filePath, facets) {
     return false
   }
 
-  if (/^facets:\s*\r?\n/m.test(fmMatch[1])) {
-    console.log('  SKIP (already has facets):', filePath)
-    return false
+  let fmText = fmMatch[1]
+
+  // 移除旧 facets 块（如果存在），支持更换分类体系后覆盖
+  const facetsIdx = fmText.search(/^facets:\r?\n/m)
+  if (facetsIdx >= 0) {
+    // 找到 facets 块的结束位置：下一个顶格 key 或末尾
+    const afterFacets = fmText.substring(facetsIdx)
+    const endMatch = afterFacets.match(/\r?\n(?=\w)/)
+    const endIdx = endMatch ? facetsIdx + endMatch.index : fmText.length
+    fmText = (fmText.substring(0, facetsIdx) + fmText.substring(endIdx)).replace(/\r?\n$/, '')
   }
 
-  const fmText = fmMatch[1]
-  const facetsBlock = '\n' + facetsToYaml(facets)
+  const facetsBlock = (facetsIdx >= 0 ? '\r\n' : '\n') + facetsToYaml(facets)
   const newFm = fmText.replace(/\r?\n$/, '') + facetsBlock
   const newContent = raw.replace(fmMatch[1], newFm)
 
