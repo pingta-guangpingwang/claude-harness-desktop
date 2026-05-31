@@ -769,9 +769,90 @@ function stripAnsiAndNoise(raw: string): string {
   return filtered.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
+const notifyProjectTool: AgentTool = {
+  name: 'notify_project',
+  description: '向指定项目的 AI 发送一条消息（跨项目 AI 之间的沟通）。当某个项目 AI 需要通知另一个项目 AI 某件事、请求配合、或传递信息时使用。消息会直接写入目标项目的 PTY 终端，目标 AI 可以看到并回应。需要协作但不派发任务时用这个，派发具体开发任务时用 task_project。',
+  parameters: {
+    type: 'object',
+    properties: {
+      project_path: { type: 'string', description: '目标项目绝对路径' },
+      message: { type: 'string', description: '要发送的消息内容。自动带上来源信息，无需手动写' },
+      from_project: { type: 'string', description: '发送方项目名（可选，用于标注消息来源）' },
+    },
+    required: ['project_path', 'message'],
+  },
+  group: 'write',
+  isReadOnly: false,
+  isConcurrencySafe: true,
+  async execute(params, ctx): Promise<ToolResult> {
+    const targetPath = params.project_path as string
+    const message = params.message as string
+    const fromName = (params.from_project as string) || '驾驭智能'
+
+    let match = ctx.projectIds.find(id => id === targetPath || id.toLowerCase() === targetPath.toLowerCase())
+    if (!match) {
+      for (const [id, name] of ctx.projectNames) {
+        if (name === targetPath || id.endsWith('\\' + targetPath) || id.endsWith('/' + targetPath) || id.includes(targetPath)) {
+          match = id; break
+        }
+      }
+    }
+    if (!match) return { success: false, output: `未找到目标项目: ${targetPath}` }
+    const targetName = ctx.projectNames.get(match) || match.split('\\').pop() || match
+
+    const ptyStatus = getPtyStatus(match)
+    if (!ptyStatus.connected) {
+      return { success: false, output: `${targetName} 的 AI 终端未连接。请先用 wake_projects 唤醒该项目。` }
+    }
+
+    const formattedMsg = `\n📨 [来自 ${fromName} 的消息]\n${message}\n(如需回复，在终端中直接输入即可，驾驭智能会读取并转发)\n`
+    const written = writeToPty(match, formattedMsg)
+    if (!written) return { success: false, output: `向 ${targetName} 发送消息失败` }
+
+    return { success: true, output: `已向 ${targetName} (${match}) 发送消息` }
+  },
+}
+
+const listFarmProjectsTool: AgentTool = {
+  name: 'list_farm_projects',
+  description: '列出驾驭农场内所有项目及其路径和状态。跨项目协作时先调用此工具了解有哪些项目可用，再调用 read_project_chat 查看目标项目的最近活动。也可用于确认某个项目是否已在农场中。',
+  parameters: {
+    type: 'object',
+    properties: {},
+    required: [],
+  },
+  group: 'read',
+  isReadOnly: true,
+  isConcurrencySafe: true,
+  async execute(_params, ctx): Promise<ToolResult> {
+    const lines: string[] = [`🌾 驾驭农场 — ${ctx.projectIds.length} 个项目\n`]
+    for (const [projectPath, name] of ctx.projectNames) {
+      const isBusy = isProjectBusy(projectPath)
+      const chatDir = path.join(projectPath, '.dbvs', 'chat')
+      let lastActivity = '无记录'
+      if (fs.existsSync(chatDir)) {
+        const files = fs.readdirSync(chatDir).filter(f => f.endsWith('.json'))
+        if (files.length > 0) {
+          const latest = files.reduce((a, b) => {
+            const ta = fs.statSync(path.join(chatDir, a)).mtimeMs
+            const tb = fs.statSync(path.join(chatDir, b)).mtimeMs
+            return ta > tb ? a : b
+          })
+          const t = fs.statSync(path.join(chatDir, latest)).mtime
+          lastActivity = t.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        }
+      }
+      const status = isBusy ? '🔴 工作中' : '🟢 空闲'
+      lines.push(`  ${status}  ${name}  →  ${projectPath}  (最后活动: ${lastActivity})`)
+    }
+    lines.push(`\n需要查看某项目 AI 的聊天记录时，调用 read_project_chat。`)
+    return { success: true, output: lines.join('\n') }
+  },
+}
+
 const readProjectChatTool: AgentTool = {
   name: 'read_project_chat',
-  description: '读取指定项目 Claude Code 最近的聊天记录。用于了解项目 AI 最近做了什么、有什么输出、当前状态如何。不需要向项目发送任何任务，直接读取已有的对话内容。支持指定读取最近 N 条消息或最近 N 小时的记录。',
+  description: '读取指定项目 Claude Code 最近的聊天记录。用于了解项目 AI 最近做了什么、有什么输出、当前状态如何。跨项目协作时先调 list_farm_projects 查看有哪些项目，再对目标项目调此工具读取记录。支持指定读取最近 N 条消息或最近 N 小时的记录。',
   parameters: {
     type: 'object',
     properties: {
@@ -852,7 +933,7 @@ const readProjectChatTool: AgentTool = {
             // ANSI 剥离 + TUI 噪声清洗，确保聊天内容对 Agent 可读
             const clean = stripAnsiAndNoise(String(msg.content))
             if (!clean) continue  // 清洗后无内容则跳过
-            messages.push(`[${time}] ${roleTag} ${clean.slice(0, 800)}`)
+            messages.push(`[${time}] ${roleTag} ${clean.slice(0, 4000)}`)
             totalMsgs++
           }
         } catch { /* skip corrupt */ }
@@ -1883,6 +1964,37 @@ const diagnoseProjectTool: AgentTool = {
   },
 }
 
+const webFetchTool: AgentTool = {
+  name: 'web_fetch',
+  description: '直接获取一个 URL 的内容（HTTP GET）。用于快速查询 API、获取网页信息，不需要派发项目 AI。适合查询 GitHub API、获取 JSON 数据等简单请求。返回纯文本/JSON，截断至 8000 字符。',
+  parameters: {
+    type: 'object',
+    properties: {
+      url: { type: 'string', description: '要获取的完整 URL' },
+    },
+    required: ['url'],
+  },
+  group: 'read',
+  isReadOnly: true,
+  isConcurrencySafe: true,
+  async execute(params): Promise<ToolResult> {
+    const url = params.url as string
+    try {
+      const mod = url.startsWith('https') ? require('https') : require('http')
+      const result = await new Promise<string>((resolve, reject) => {
+        mod.get(url, { timeout: 15000, headers: { 'User-Agent': 'DeepBlueHarness/1.0', 'Accept': 'application/json,text/*' } }, (res: any) => {
+          let data = ''
+          res.on('data', (chunk: string) => { data += chunk; if (data.length > 100000) res.destroy() })
+          res.on('end', () => resolve(data.slice(0, 8000)))
+        }).on('error', reject).on('timeout', function(this: any) { this.destroy(); reject(new Error('timeout')) })
+      })
+      return { success: true, output: result }
+    } catch (e: any) {
+      return { success: false, output: `获取失败: ${e.message}` }
+    }
+  },
+}
+
 // ============== 注册全部工具 ==============
 
 export function registerAllTools(): void {
@@ -1894,7 +2006,10 @@ export function registerAllTools(): void {
   registerTool(broadcastTool)
   registerTool(taskProjectTool)
   // P1 — 情报收集（只读项目 AI 聊天记录，绝不直接读项目文件）
+  registerTool(webFetchTool)
+  registerTool(listFarmProjectsTool)
   registerTool(readProjectChatTool)
+  registerTool(notifyProjectTool)
   registerTool(healthReportTool)
   // P1.5 — 任务队列
   registerTool(pollProjectsTool)

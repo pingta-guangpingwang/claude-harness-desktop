@@ -8,6 +8,7 @@ import type { ConversationTurn } from '../harnessAgent/agentLoop.js'
 import { createCliToolWrapper, createSkillDiscoveryTool } from '../harnessAgent/cliBridge.js'
 import { registerTool } from '../harnessAgent/toolRegistry.js'
 import type { AgentContext, AgentEvent } from '../harnessAgent/types.js'
+import { onHarnessMention } from './ptyManager.js'
 import { harnessScheduler } from '../harnessAgent/scheduler.js'
 import { setNotifierWindow } from './projectNotifier.js'
 import * as fs from 'fs'
@@ -19,6 +20,7 @@ let mainWindow: BrowserWindow | null = null
 let agentLoop: AgentLoop | null = null
 let permissionManager: PermissionManager
 let toolsRegistered = false
+let lastApiKey = '' // 缓存 API Key 供 @HARNESS 自动启动
 
 // 跨轮次对话记忆（持久化到本地，保留上下文）
 const MAX_MEMORY_TURNS = 30
@@ -62,6 +64,143 @@ export async function registerHarnessIpc(window: BrowserWindow) {
   }
   permissionManager = new PermissionManager()
 
+  // @harness 触发器：项目 AI 在终端中 @harness 时自动通知驾驭智能
+  // 积压的 @harness 请求（等 Agent 启动后处理）
+  const pendingHarnessMentions: Array<{ prompt: string; projectName: string }> = []
+
+  // 前端直接转发的 @harness 请求（用户在项目 Chat 中输入 @harness xxx）
+  ipcMain.handle('harness:relay', async (_event, request: { projectPath: string; projectName: string; message: string }) => {
+    const msg = request.message.replace(/^@harness\s*/i, '').trim()
+    const projName = request.projectName || request.projectPath.split('\\').pop() || request.projectPath
+    const prompt = `[来自项目 「${projName}」的跨项目请求]
+${msg}
+
+请使用你的工具（list_farm_projects / read_project_chat / notify_project 等）来处理这个请求。完成后用 notify_project 通知发起方项目结果。`
+
+    console.log('[HarnessIPC] harness:relay 收到:', projName, '-', msg.slice(0, 80))
+
+    if (agentLoop) {
+      if (pendingHarnessMentions.length > 0) {
+        const mentions = pendingHarnessMentions.splice(0)
+        for (const m of mentions) agentLoop.queueMessage(m.prompt)
+      }
+      agentLoop.queueMessage(prompt)
+      return { success: true, message: '已转发给驾驭智能' }
+    } else {
+      pendingHarnessMentions.push({ prompt, projectName: projName })
+      // 尝试自动启动 Agent（多个来源获取 API Key）
+      if (!lastApiKey) {
+        try {
+          const fs = require('fs'); const path = require('path')
+          const configPath = path.join(require('electron').app.getPath('userData'), 'horsefarm-config.json')
+          if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+            const activeKey = (config.apiKeys || []).find((k: any) => k.enabled && k.status !== 'exhausted' && k.status !== 'error')
+            if (activeKey?.key) lastApiKey = activeKey.key
+          }
+        } catch {}
+      }
+      if (lastApiKey) {
+        console.log('[HarnessIPC] harness:relay 自动启动 Agent')
+        try {
+          const ctx2: AgentContext = {
+            projectIds: [request.projectPath],
+            projectNames: new Map([[request.projectPath, projName]]),
+            onlineProjects: new Set([request.projectPath]),
+            apiKey: lastApiKey,
+            model: 'claude-sonnet-4-6',
+            autonomousMode: true,
+            maxAutonomousTurns: 5,
+          }
+          agentLoop = new AgentLoop(ctx2, permissionManager!, conversationMemory)
+          const mentions = pendingHarnessMentions.splice(0)
+          for (const m of mentions) agentLoop!.queueMessage(m.prompt)
+          console.log('[HarnessIPC] Agent 自动启动，处理', mentions.length, '个请求')
+          agentLoop.run('处理 @harness 协作请求', (event: AgentEvent) => {
+            sendToRenderer('harness:event', event)
+          }).catch(e => console.error('[HarnessIPC] Agent error:', e?.message)).finally(() => { agentLoop = null })
+          return { success: true, message: '驾驭智能已启动，正在处理请求' }
+        } catch (e: any) {
+          console.error('[HarnessIPC] Agent 自动启动失败:', e?.message)
+        }
+      }
+      return { success: true, message: '请先在驾驭智能 Chat 中配置 API Key，然后重新发送 @harness' }
+    }
+  })
+
+  onHarnessMention((projectPath, projectName, message, recentContext) => {
+    const prompt = `[来自项目 「${projectName}」的呼叫]
+项目 AI 说: ${message}
+
+该项目最近终端输出:
+${recentContext.slice(-1000)}
+
+请根据项目 AI 的请求，使用你的工具（list_farm_projects / read_project_chat / notify_project 等）来协助它。如果不需要行动，回复"收到"即可。`
+    console.log('[HarnessIPC] @harness 触发:', projectName, '-', message.slice(0, 80))
+
+    if (agentLoop) {
+      // 同时清空积压队列
+      if (pendingHarnessMentions.length > 0) {
+        const mentions = pendingHarnessMentions.splice(0)
+        for (const m of mentions) agentLoop.queueMessage(m.prompt)
+      }
+      agentLoop.queueMessage(prompt)
+    } else {
+      // Agent 还没启动 → 自动启动
+      pendingHarnessMentions.push({ prompt, projectName })
+      console.log('[HarnessIPC] Agent 未启动，尝试自动启动 (积压:', pendingHarnessMentions.length, ')')
+      try {
+        // 多来源获取 API Key：缓存 > harness:send > 配置文件
+        let apiKey = lastApiKey
+        if (!apiKey) {
+          try {
+            const fs = require('fs')
+            const path = require('path')
+            const configPath = path.join(require('electron').app.getPath('userData'), 'horsefarm-config.json')
+            if (fs.existsSync(configPath)) {
+              const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+              const activeKey = (config.apiKeys || []).find((k: any) => k.enabled && k.status !== 'exhausted' && k.status !== 'error')
+              if (activeKey?.key) { apiKey = activeKey.key; lastApiKey = apiKey }
+            }
+          } catch { /* fall through */ }
+        }
+        if (!apiKey) { console.log('[HarnessIPC] 无可用 API Key，请在设置中配置 API Key'); return }
+        const ctx2: AgentContext = {
+          projectIds: [projectPath],
+          projectNames: new Map([[projectPath, projectName]]),
+          onlineProjects: new Set([projectPath]),
+          apiKey,
+          model: 'claude-sonnet-4-6',
+          autonomousMode: true,
+          maxAutonomousTurns: 5,
+        }
+        agentLoop = new AgentLoop(ctx2, permissionManager!, conversationMemory)
+        const mentions = pendingHarnessMentions.splice(0)
+        for (const m of mentions) agentLoop!.queueMessage(m.prompt)
+        console.log('[HarnessIPC] Agent 自动启动，处理', mentions.length, '个积压请求')
+        const originProject = projectPath
+        agentLoop.run('处理 @HARNESS 协作请求', (event: AgentEvent) => {
+          sendToRenderer('harness:event', event)
+        }).then(finalMsg => {
+          if (finalMsg) {
+            conversationMemory.push({ role: 'user', content: '@HARNESS 协作请求' })
+            conversationMemory.push({ role: 'assistant', content: finalMsg })
+            while (conversationMemory.length > MAX_MEMORY_TURNS) conversationMemory.shift()
+            saveConversationMemory()
+          }
+          // 通知发起项目：驾驭智能已完成处理
+          try {
+            const { writeToPty } = require('./ptyManager.js')
+            const summary = finalMsg ? finalMsg.slice(0, 500) : '处理完成'
+            writeToPty(originProject, `\n📬 驾驭智能已完成你的 @HARNESS 请求：\n${summary}\n`)
+          } catch {}
+        }).catch(e => console.error('[HarnessIPC] Agent auto-run error:', e?.message)).finally(() => { agentLoop = null })
+      } catch (e: any) {
+        console.error('[HarnessIPC] Agent 自动启动失败:', e?.message)
+      }
+    }
+  })
+
   // 启动 Agent 循环
   ipcMain.handle('harness:send', async (_event, request: {
     message: string
@@ -76,6 +215,8 @@ export async function registerHarnessIpc(window: BrowserWindow) {
     if (!request.apiKey || !request.message) {
       return { success: false, error: '缺少 apiKey 或消息内容' }
     }
+    // 缓存 API Key 供 @HARNESS 自动启动使用
+    if (request.apiKey) lastApiKey = request.apiKey
 
     // 更新权限
     if (request.permissions) {
@@ -107,6 +248,15 @@ export async function registerHarnessIpc(window: BrowserWindow) {
 
     agentLoop = new AgentLoop(ctx, permissionManager, conversationMemory)
 
+    // 处理积压的 @harness 请求
+    if (pendingHarnessMentions.length > 0) {
+      const mentions = pendingHarnessMentions.splice(0)
+      console.log('[HarnessIPC] 处理积压 @harness 请求:', mentions.length)
+      for (const m of mentions) {
+        agentLoop.queueMessage(m.prompt)
+      }
+    }
+
     try {
       const finalMessage = await agentLoop.run(request.message, (event: AgentEvent) => {
         sendToRenderer('harness:event', event)
@@ -123,9 +273,25 @@ export async function registerHarnessIpc(window: BrowserWindow) {
       }
       saveConversationMemory()
 
+      // 检查是否有排队消息（用户中途插话），继续处理
+      if (agentLoop.hasPendingMessages()) {
+        const nextMsg = agentLoop.popPendingMessage()!
+        console.log('[HarnessIPC] 处理排队消息:', nextMsg.slice(0, 60))
+        try {
+          const nextFinal = await agentLoop.run(nextMsg, (event: AgentEvent) => {
+            sendToRenderer('harness:event', event)
+          })
+          if (nextFinal) {
+            conversationMemory.push({ role: 'user', content: nextMsg })
+            conversationMemory.push({ role: 'assistant', content: nextFinal })
+            while (conversationMemory.length > MAX_MEMORY_TURNS) conversationMemory.shift()
+            saveConversationMemory()
+          }
+        } catch { /* 排队消息处理失败不影响主流程 */ }
+      }
+
       return { success: true, finalMessage }
     } catch (err: any) {
-      // AbortError 是用户正常中断，不是错误
       if (err?.name === 'AbortError') {
         return { success: true, finalMessage: '' }
       }

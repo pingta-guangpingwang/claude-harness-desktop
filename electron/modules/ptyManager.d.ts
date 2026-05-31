@@ -17,6 +17,8 @@ interface PtySession {
     lastDataAt: number;
     isClaude: boolean;
 }
+type HarnessMentionCallback = (projectPath: string, projectName: string, message: string, recentContext: string) => void;
+export declare function onHarnessMention(cb: HarnessMentionCallback): void;
 /** 获取会话表（供 harnessAgent 工具直接调用） */
 export declare function getSessions(): Map<string, PtySession>;
 /** 直接 spawn PTY（供 harnessAgent 工具调用，不走 IPC）。

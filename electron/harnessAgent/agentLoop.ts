@@ -145,9 +145,20 @@ export class AgentLoop {
       this.ctx.pendingMessages = []
     }
     this.ctx.pendingMessages.push(msg)
-    // Claude Code 范式：用户中途插话 → 立即中断当前 API 调用
-    // 不 destroy agent，只 signal abort 让当前 callLLMStream 快速返回
     this.abortController?.abort('user_interject')
+  }
+
+  /** 检查并取出排队消息（外部调用，Agent 完成后检查是否需要继续处理） */
+  popPendingMessage(): string | undefined {
+    const arr = this.ctx.pendingMessages as string[] | undefined
+    if (arr && arr.length > 0) return arr.shift()
+    return undefined
+  }
+
+  /** 是否还有排队消息 */
+  hasPendingMessages(): boolean {
+    const arr = this.ctx.pendingMessages as string[] | undefined
+    return !!(arr && arr.length > 0)
   }
 
   resolvePermission(decision: 'allow' | 'deny' | 'allow_once'): void {

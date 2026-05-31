@@ -53,6 +53,62 @@ const rawRecentOutput = new Map<string, string[]>()
 const readableBuffer = new Map<string, string[]>()
 const MAX_RECENT_LINES = 2000
 
+// @HARNESS: 标记检测：项目 AI 在 PTY 中输出 @HARNESS: xxx 时自动通知驾驭智能
+// 与 @harness（用户输入，ChatInput 拦截）不同，这是项目 AI 主动呼叫驾驭智能的通道
+type HarnessMentionCallback = (projectPath: string, projectName: string, message: string, recentContext: string) => void
+let harnessMentionCallback: HarnessMentionCallback | null = null
+const lastHarnessMention = new Map<string, number>()
+
+export function onHarnessMention(cb: HarnessMentionCallback): void {
+  harnessMentionCallback = cb
+}
+
+/** 注入协作指令到项目 .claude/COLLABORATION.md */
+function injectHarnessInstruction(key: string): void {
+  const fs = require('fs')
+  const path = require('path')
+  const claudeDir = path.join(key, '.claude')
+  const mdPath = path.join(claudeDir, 'COLLABORATION.md')
+  const content = `# 跨项目协作机制
+
+你运行在终端模拟器中，所有输出都会被系统监控。
+
+## 如何呼叫驾驭智能
+
+当你在当前项目无法完成任务、需要农场内其他项目的信息或帮助时，
+在回复中独占一行输出以下标记：
+
+\`\`\`
+AT-HARNESS: <用中文描述你需要的帮助>
+\`\`\`
+
+（实际使用时把 AT 替换为 @ 符号，HARNESS 全大写，冒号用英文 :）
+
+系统会自动检测并转给驾驭智能处理，不需要用户介入。
+
+## 示例
+
+回复中输出（注意：实际使用 @ 符号，不是 AT）：
+\`\`\`
+@HARNESS: 请帮我在农场所有项目中查找 API 设计规范文档
+\`\`\`
+
+系统会自动：1) 检测标记 2) 通知驾驭智能 3) 跨项目搜索 4) 结果返回
+
+## 重要
+- 标记独占一行，不要用代码块包裹
+- @符号 + 全大写HARNESS + 英文冒号 + 空格 + 中文描述
+- 这是你主动发起的系统调用，不是给用户的建议
+`
+  try {
+    if (!fs.existsSync(claudeDir)) fs.mkdirSync(claudeDir, { recursive: true })
+    fs.writeFileSync(mdPath, content, 'utf-8')
+    console.log('[PTY] 协作指令已写入:', mdPath)
+  } catch (e) {
+    setTimeout(() => { try { writeToPty(key, '\n协作指令已就绪，详见 .claude/COLLABORATION.md\n') } catch {} }, 3000)
+  }
+}
+
 /** Claude Code 思考阶段关键词 → 对应状态文本（移植自 ChatContext.tsx） */
 const THINKING_PATTERNS: [RegExp, string][] = [
   [/scurry/i, 'Scurrying...'],
@@ -397,6 +453,45 @@ interface ReadySignal {
 
 const readySignals = new Map<string, ReadySignal>()
 
+// @harness 通知去重：每个项目只通知一次
+const harnessNotified = new Set<string>()
+
+function notifyHarnessAvailable(key: string): void {
+  if (harnessNotified.has(key)) return
+  harnessNotified.add(key)
+  const projName = key.split('\\').pop() || key.split('/').pop() || key
+  const msg = `\n📢 驾驭智能已就绪。如需跨项目协作：在聊天框输入 @harness <你的请求>，我会转给驾驭智能处理。\n`
+  setTimeout(() => {
+    try { writeToPty(key, msg) } catch {}
+  }, 2000)
+}
+
+function injectChatHistory(key: string): void {
+  try {
+    const fs = require('fs')
+    const path = require('path')
+    const chatDir = path.join(key, '.dbvs', 'chat')
+    if (!fs.existsSync(chatDir)) return
+    const files = fs.readdirSync(chatDir).filter((f: string) => f.endsWith('.json'))
+    if (files.length === 0) return
+    // 取最新的 session
+    files.sort((a: string, b: string) => {
+      return fs.statSync(path.join(chatDir, b)).mtimeMs - fs.statSync(path.join(chatDir, a)).mtimeMs
+    })
+    const latest = JSON.parse(fs.readFileSync(path.join(chatDir, files[0]), 'utf-8'))
+    const msgs = (latest.messages || []).filter((m: any) => m.role === 'user' || m.role === 'assistant')
+    if (msgs.length === 0) return
+    const summary = msgs.slice(-10).map((m: any) => {
+      const role = m.role === 'user' ? '用户' : 'AI'
+      const content = String(m.content || '').replace(/\x1b\[[0-9;]*m/g, '').replace(/[\r\n]/g, ' ').slice(0, 500)
+      return `[${role}] ${content}`
+    }).join('\n')
+    const ctx = `\n📋 以下是本次会话之前的历史对话摘要（最近 ${Math.min(10, msgs.length)} 条）：\n${summary}\n---\n请基于以上历史上下文继续工作。\n`
+    setTimeout(() => { try { writeToPty(key, ctx) } catch {} }, 5000)
+    console.log('[PTY] 历史上下文已注入:', key.slice(-40), '-', msgs.length, '条消息')
+  } catch { /* 历史注入失败不影响主流程 */ }
+}
+
 function signalReady(key: string): void {
   const rs = readySignals.get(key)
   if (rs) {
@@ -404,6 +499,9 @@ function signalReady(key: string): void {
     rs.resolver()
     readySignals.delete(key)
   }
+  notifyHarnessAvailable(key)
+  injectHarnessInstruction(key)
+  injectChatHistory(key)
 }
 
 function waitForReady(key: string, timeoutMs: number = 15000): Promise<boolean> {
@@ -695,6 +793,14 @@ async function spawnWithRetry(file: string, args: string[], key: string, isClaud
         // 新项目默认跳过信任对话框 + 默认接受编辑，避免首次启动时卡住
         if (settings.hasTrustDialogAccepted !== true) settings.hasTrustDialogAccepted = true
         if (!settings.defaultMode) settings.defaultMode = 'acceptEdits'
+        // 预授权常用 Bash 命令，避免 headless 模式下权限对话框阻塞
+        if (!settings.permissions) settings.permissions = {}
+        if (!settings.permissions.allow) settings.permissions.allow = [
+          'Bash(curl *)', 'Bash(cmd *)', 'Bash(dir *)', 'Bash(find *)',
+          'Bash(grep *)', 'Bash(cat *)', 'Bash(ls *)', 'Bash(python *)',
+          'Bash(node *)', 'Bash(npm *)', 'Bash(git *)', 'Bash(gh *)',
+          'Bash(cd *)', 'Bash(echo *)', 'Bash(mkdir *)',
+        ]
         fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8')
         console.log('[PTY] 已写入 .claude/settings.json —', key.slice(-40))
       } catch (e) { /* settings write failed, still have env var + auto-answer as fallback */ }
@@ -765,9 +871,23 @@ async function spawnWithRetry(file: string, args: string[], key: string, isClaud
           autoReplyTimes.set(key, now2)
           newPty.write('\x1b')
         }
-        // Bash 权限对话框: "Do you want to proceed? 1. Yes ❯ 2. No"
-        else if (/Do you want to proceed/i.test(joined) && /1\.\s*Yes/i.test(joined)) {
-          console.log('[PTY] ⚡ 自动应答 Bash 权限对话框 → Yes —', key.slice(-40))
+        // 权限对话框 v2.1: "Do you wanttoproceed?" (文本可能连在一起)
+        // 格式: "Do you wanttoproceed?❯1Yes2Yes,allow...3.No" 或 "Read.*Doyouwanttoproceed?❯1Yes2Yes..."
+        // 策略: 检测到 "Do you want" + "proceed" + "1. Yes" 或 "1Yes" → 自动选 Yes
+        else if (/do\s*you\s*want\s*to\s*proceed/i.test(joined) && /1\s*[\.]?\s*Yes/i.test(joined)) {
+          console.log('[PTY] ⚡ 自动应答权限对话框(Proceed) → Yes —', key.slice(-40))
+          autoReplyTimes.set(key, now2)
+          newPty.write('1\r')
+        }
+        // Read 权限: "Read(\mnt\h\...) Doyouwanttoproceed?❯1Yes 2Yes,allowreading..."
+        else if (/1\s*[\.]?\s*Yes.*2\s*[\.]?\s*Yes.*allow.*read/i.test(joined) && !/Do you want/i.test(joined)) {
+          console.log('[PTY] ⚡ 自动应答读文件权限 → Yes —', key.slice(-40))
+          autoReplyTimes.set(key, now2)
+          newPty.write('1\r')
+        }
+        // Bash 权限: "Bash command.*Doyouwanttoproceed?❯1.Yes 2.Yes,anddon'taskagain..."
+        else if (/Bash\s*(command|cmd)/i.test(joined) && /1\s*[\.]?\s*Yes.*(?:2|No)/i.test(joined)) {
+          console.log('[PTY] ⚡ 自动应答 Bash 权限 → Yes —', key.slice(-40))
           autoReplyTimes.set(key, now2)
           newPty.write('1\r')
         }
@@ -808,6 +928,33 @@ async function spawnWithRetry(file: string, args: string[], key: string, isClaud
       try { appendRawOutput(key, data) } catch (e) { /* 聚合失败不阻塞 PTY 数据流 */ }
       sendToRenderer('pty:data', key, data)
       feedCollector(key, data)
+
+      // @HARNESS: 检测：项目 AI 刻意输出的协作请求
+      // 使用 stripped（去 ANSI 但保留换行）+ buffered 累加，处理跨 chunk 的多行输出
+      if (harnessMentionCallback) {
+        const bufKey = '__harness__' + key
+        let buf = readableBuffer.get(bufKey) as string[] | undefined
+        if (!buf) { buf = []; readableBuffer.set(bufKey, buf) }
+        buf.push(stripped)
+        if (buf.length > 10) buf.shift()
+        const combined = buf.join('\n')
+        const match = combined.match(/@HARNESS:\s*(.+)/i)
+        if (match) {
+          const now3 = Date.now()
+          const last = lastHarnessMention.get(key) || 0
+          if (now3 - last > 15000) {
+            lastHarnessMention.set(key, now3)
+            buf.length = 0
+            const reqMsg = match[1].trim().replace(/[\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim()
+            if (reqMsg.length > 5) {
+              const projName = key.split('\\').pop() || key.split('/').pop() || key
+              const recent = getRecentPtyOutput(key, 30)
+              console.log('[PTY] @HARNESS 检测到:', projName, '-', reqMsg.slice(0, 80))
+              setTimeout(() => harnessMentionCallback!(key, projName, reqMsg, recent), 100)
+            }
+          }
+        }
+      }
     })
 
     newPty.onExit(({ exitCode }: { exitCode: number }) => {
@@ -1114,7 +1261,7 @@ export function getRecentPtyOutput(projectPath: string, _maxLines: number = 500)
         .replace(/❯/g, '')
         .trim()
       if (!clean) continue
-      parts.push(`🤖 ${clean.slice(0, 800)}`)
+      parts.push(`🤖 ${clean.slice(0, 3000)}`)
     }
     parts.push('')
   }
@@ -1148,7 +1295,7 @@ export function getRecentPtyOutput(projectPath: string, _maxLines: number = 500)
   if (parts.length === 0) {
     const readable = readableBuffer.get(key)
     if (readable && readable.length > 0) {
-      const recent = readable.slice(-200)
+      const recent = readable.slice(-500)
       const unique: string[] = []
       let prev = ''
       for (const line of recent) {

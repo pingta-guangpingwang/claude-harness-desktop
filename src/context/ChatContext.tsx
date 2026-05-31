@@ -48,6 +48,7 @@ interface ChatContextValue {
   clear: () => void
   loadSession: (session: ChatSession) => void
   listSessions: (projectPath: string) => Promise<ChatSession[]>
+  listAllProjectSessions: (projectPaths: string[]) => Promise<Array<ChatSession & { projectName: string }>>
   deleteSession: (projectPath: string, sessionId: string) => Promise<void>
 }
 
@@ -162,6 +163,13 @@ function cleanPtyOutput(text: string): { clean: string; status: string | null } 
     if (/\d+\s*skill\s*descriptions?\s*dropped/i.test(trimmed)) continue
     if (/\/doctor\s*for\s*details/i.test(trimmed)) continue
     if (/^(Welcome back|Tips for getting|Run \/init|What.s new|Internal fixes|API Usage Billing)/i.test(trimmed)) continue
+    // TUI 框线行（+--- 或 | 开头的框架）
+    if (/^[+|][-\s]{5,}/.test(trimmed)) continue
+    if (/^\+[-]{3,}.*v\d\.\d/.test(trimmed)) continue
+    // 快捷键提示行
+    if (/^(?:shift\+tab|ctrl\+[a-z]|esc\s*to|acceptedits?|max\s*·|for\s*agents|Running in)/i.test(trimmed)) continue
+    // 无空格的长 ASCII 符号串（TUI 渲染噪声，排除 URL）
+    if (trimmed.length > 60 && /^[a-zA-Z0-9|/+*.\-]+$/.test(trimmed) && !/^https?:/i.test(trimmed)) continue
     if (/^\d+\s*tokens?\s*·\s*thinking/i.test(trimmed)) continue
     // TUI footer 行（快捷键提示、接受编辑、向上编辑队列）
     if (/Tab to (amend|complete)/i.test(trimmed)) continue
@@ -252,25 +260,30 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     })
   }, [version])
 
-  // 自动保存所有项目会话到磁盘（仅问答内容，过滤思考状态气泡）。
-  // debounce 2s 避免高频 PTY 数据写入风暴。
+  // 立即持久化指定项目会话到磁盘
+  const persistSession = useCallback((key: string, s: ProjectSessionState) => {
+    if (!s.sessionRef) return
+    s.sessionRef.messages = s.messages.filter(m => {
+      if (m.role === 'user') return true
+      if (m.role === 'assistant') return true  // 保留所有助手消息，不依赖 isResponse 标记
+      if (m.role === 'system' && !m.content.startsWith('🧠')) return true
+      return false
+    })
+    window.electronAPI.sessionSave({ ...s.sessionRef, messages: s.sessionRef.messages }).catch(() => {})
+  }, [])
+
+  // 自动保存所有项目会话到磁盘（debounce 500ms，减少意外关闭丢失）
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       sessionsRef.current.forEach((s, key) => {
-        if (!s.sessionRef) return
-        s.sessionRef.messages = s.messages.filter(m => {
-          if (m.role === 'user') return true
-          if (m.role === 'assistant' && m.isResponse) return true
-          if (m.role === 'system' && !m.content.startsWith('🧠')) return true
-          return false
-        })
-        window.electronAPI.sessionSave({ ...s.sessionRef, messages: s.sessionRef.messages }).catch(() => {})
+        if (s.messages.length === 0) return
+        persistSession(key, s)
       })
-    }, 2000)
+    }, 500)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [version])
+  }, [version, persistSession])
 
   // 监听 PTY 数据（全局监听，按 projectPath 分发）
   // 思考阶段 → 只更新单条状态气泡；● 回复 → 追加实际回复消息
@@ -373,12 +386,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
         return {
           ...prev,
-          messages: [initialMsg],
+          messages: [...prev.messages, initialMsg],
           isConnected: false,
           isConnecting: true,
           lastDataAt: Date.now(),
-          sessionId: newSessionRef.sessionId,
-          sessionRef: newSessionRef,
+          sessionId: prev.sessionId || newSessionRef.sessionId,
+          sessionRef: prev.sessionRef || newSessionRef,
         }
       })
       // 延迟设为已连接（给 Claude Code 启动时间）
@@ -483,19 +496,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         timestamp: new Date().toISOString(),
       }
       // 先标记 isConnecting，等待 Claude Code 完成启动（信任确认 + 欢迎页）
-      updateSession(key, _prev => ({
-        messages: [initialMsg],
+      // 保留已有消息（loadSession 恢复的历史记录），initialMsg 追加在末尾
+      updateSession(key, prev => ({
+        ...prev,
+        messages: [...prev.messages, initialMsg],
         isConnected: false,
         isConnecting: true,
         lastDataAt: Date.now(),
-        sessionId: sid,
-        sessionRef: {
+        sessionId: prev.sessionId || sid,
+        sessionRef: prev.sessionRef || {
           sessionId: sid,
           projectPath: key,
           messages: [initialMsg],
           startedAt: new Date().toISOString(),
         },
-        rawLogs: [`[${new Date().toLocaleTimeString('zh-CN')}] PTY: ${key}`],
+        rawLogs: [...(prev.rawLogs || []), `[${new Date().toLocaleTimeString('zh-CN')}] PTY: ${key}`],
       }))
 
       // 4s 后标记为已连接（给 Claude Code 足够时间完成安全确认和欢迎屏）
@@ -536,6 +551,26 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const send = useCallback((text: string) => {
     const key = currentProject
     if (!key) return
+
+    // @harness 拦截：不发给项目 AI，直接转发给驾驭智能
+    if (/^@harness\b/i.test(text.trim())) {
+      const projName = key.split('\\').pop() || key.split('/').pop() || key
+      updateSession(key, prev => ({
+        ...prev,
+        messages: [
+          ...prev.messages,
+          { id: createId(), role: 'user' as const, content: text, timestamp: new Date().toISOString() },
+          { id: createId(), role: 'system' as const, content: '已转发给驾驭智能，等待处理...', timestamp: new Date().toISOString() },
+        ],
+      }))
+      window.electronAPI.harnessRelay({ projectPath: key, projectName: projName, message: text }).catch(() => {})
+      setTimeout(() => {
+        const s = sessionsRef.current.get(key)
+        if (s) persistSession(key, s)
+      }, 100)
+      return
+    }
+
     updateSession(key, prev => ({
       ...prev,
       messages: [...prev.messages, {
@@ -546,7 +581,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }],
     }))
     window.electronAPI.ptyWrite(key, text + '\r')
-  }, [currentProject])
+    // 用户发送消息后立即持久化
+    setTimeout(() => {
+      const s = sessionsRef.current.get(key)
+      if (s) persistSession(key, s)
+    }, 100)
+  }, [currentProject, persistSession])
 
   const stop = useCallback(() => {
     const key = currentProject
@@ -591,6 +631,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     return []
   }, [])
 
+  const listAllProjectSessions = useCallback(async (projectPaths: string[]): Promise<Array<ChatSession & { projectName: string }>> => {
+    const result = await window.electronAPI.sessionListMulti(projectPaths)
+    if (result.success) return result.sessions
+    return []
+  }, [])
+
   const deleteSession = useCallback(async (projectPath: string, sessionId: string) => {
     await window.electronAPI.sessionDelete(projectPath, sessionId)
   }, [])
@@ -598,7 +644,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   return (
     <ChatContext.Provider value={{
       messages, isConnected, isConnecting, currentProject, currentSessionId, rawLogs, projectStatuses,
-      launch, send, stop, clear, loadSession, listSessions, deleteSession,
+      launch, send, stop, clear, loadSession, listSessions, listAllProjectSessions, deleteSession,
     }}>
       {children}
     </ChatContext.Provider>

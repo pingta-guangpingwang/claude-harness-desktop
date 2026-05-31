@@ -178,8 +178,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => { ipcRenderer.removeListener('pty:spawned', handler) }
   },
 
+  harnessRelay: (request: any) => ipcRenderer.invoke('harness:relay', request),
+
   // ============ Session / Chat History (v3.0) ============
   sessionList: (projectPath?: string) => ipcRenderer.invoke('session:list', projectPath),
+  sessionListMulti: (projectPaths: string[]) => ipcRenderer.invoke('session:list-multi', projectPaths),
   sessionGet: (projectPath: string, sessionId: string) => ipcRenderer.invoke('session:get', projectPath, sessionId),
   sessionDelete: (projectPath: string, sessionId: string) => ipcRenderer.invoke('session:delete', projectPath, sessionId),
   sessionSave: (session: any) => ipcRenderer.invoke('session:save', session),

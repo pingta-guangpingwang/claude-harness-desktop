@@ -41,14 +41,17 @@ export function registerSessionIpc() {
     try {
       const dir = sessionDir(session.projectPath)
       fs.mkdirSync(dir, { recursive: true })
-      fs.writeFileSync(sessionPath(session.projectPath, session.sessionId), JSON.stringify(session, null, 2), 'utf-8')
+      const sp = sessionPath(session.projectPath, session.sessionId)
+      // 原子写入：先写临时文件，再 rename，防止写入中途崩溃损坏文件
+      const tmp = sp + '.tmp'
+      fs.writeFileSync(tmp, JSON.stringify(session, null, 2), 'utf-8')
+      fs.renameSync(tmp, sp)
 
       // 同时更新内存缓存，供 Agent 实时读取
       const key = normPath(session.projectPath)
       const msgs = (session.messages || []).filter(m => {
-        // 只保留有用的消息：用户消息 + AI 回复 + 非思考系统消息
         if (m.role === 'user') return true
-        if (m.role === 'assistant' && (m as any).isResponse) return true
+        if (m.role === 'assistant') return true
         if (m.role === 'system' && !m.content.startsWith('🧠')) return true
         return false
       })
@@ -78,6 +81,32 @@ export function registerSessionIpc() {
 
       results.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
       return { success: true, sessions: results }
+    } catch (err) {
+      return { success: false, sessions: [], message: String(err) }
+    }
+  })
+
+  // 列出多个项目路径的所有会话（跨项目历史视图）
+  ipcMain.handle('session:list-multi', async (_event, projectPaths: string[]) => {
+    try {
+      const allSessions: Array<ChatSession & { projectName: string }> = []
+      for (const projPath of projectPaths) {
+        const dir = sessionDir(projPath)
+        if (!fs.existsSync(dir)) continue
+        const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'))
+        for (const file of files) {
+          try {
+            const raw = fs.readFileSync(path.join(dir, file), 'utf-8')
+            const session = JSON.parse(raw) as ChatSession
+            allSessions.push({
+              ...session,
+              projectName: projPath.split('\\').pop() || projPath.split('/').pop() || projPath,
+            })
+          } catch { /* skip corrupt */ }
+        }
+      }
+      allSessions.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+      return { success: true, sessions: allSessions }
     } catch (err) {
       return { success: false, sessions: [], message: String(err) }
     }

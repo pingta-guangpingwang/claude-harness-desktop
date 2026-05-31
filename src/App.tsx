@@ -8,6 +8,14 @@ const HorseFarm = lazy(() => import('./components/HorseFarm/HorseFarm'))
 
 function App() {
   const [state, dispatch] = useHFContext()
+
+  // 全局监听驾驭智能事件（确保任何面板都能收到）
+  useEffect(() => {
+    const unsub = window.electronAPI.harnessOnEvent((event: any) => {
+      console.log('[HarnessEvent]', event.type, event.data?.slice?.(0, 100) || '')
+    })
+    return unsub
+  }, [])
   const { t, locale, setLocale } = useI18n()
   const [isFloating, setIsFloating] = useState(() => window.location.hash === '#/floating')
 

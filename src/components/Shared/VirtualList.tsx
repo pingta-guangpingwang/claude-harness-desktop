@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 
 // =============================================================================
 // VirtualList — dynamic object pool windowed list
@@ -22,6 +22,8 @@ export interface VirtualListProps<T> {
   className?: string
   style?: React.CSSProperties
   getItemKey?: (item: T, index: number) => string | number
+  /** 是否自动跟随底部（新消息到达时滚动到底部） */
+  followBottom?: boolean
 }
 
 interface MeasuredItem {
@@ -38,12 +40,44 @@ export function VirtualList<T>({
   className,
   style,
   getItemKey,
+  followBottom = false,
 }: VirtualListProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null)
   const measurementsRef = useRef<Map<number, number>>(new Map())
   const [scrollTop, setScrollTop] = useState(0)
   const [containerHeight, setContainerHeight] = useState(0)
   const [measureTick, setMeasureTick] = useState(0)
+  const prevLengthRef = useRef(items.length)
+  const userScrolledRef = useRef(false)
+
+  // followBottom: 新消息到达时 / followBottom 变为 true 时自动滚到底部
+  const wasFollowingRef = useRef(followBottom)
+  useEffect(() => {
+    const justStartedFollowing = followBottom && !wasFollowingRef.current
+    if (justStartedFollowing) {
+      userScrolledRef.current = false // 重置翻阅状态
+    }
+    const newItems = items.length > prevLengthRef.current
+    if (followBottom && (newItems || justStartedFollowing) && !userScrolledRef.current) {
+      // 多次尝试滚动，确保布局计算完成
+      const scroll = () => {
+        if (containerRef.current) {
+          containerRef.current.scrollTop = containerRef.current.scrollHeight
+        }
+      }
+      requestAnimationFrame(() => { scroll(); setTimeout(scroll, 100) })
+    }
+    prevLengthRef.current = items.length
+    wasFollowingRef.current = followBottom
+  }, [items.length, followBottom])
+
+  // 检测用户手动滚动（离开底部 = 用户主动翻阅历史）
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    setScrollTop(el.scrollTop)
+    // 用户离开底部超过 60px 视为主动翻阅
+    userScrolledRef.current = el.scrollHeight - el.scrollTop - el.clientHeight > 60
+  }, [])
 
   // Called when the container resizes or we mount
   const updateContainerHeight = useCallback(() => {
@@ -115,10 +149,6 @@ export function VirtualList<T>({
     [],
   )
 
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    setScrollTop(e.currentTarget.scrollTop)
-  }, [])
-
   if (items.length === 0) {
     return <div className={className} style={style} />
   }
@@ -127,6 +157,7 @@ export function VirtualList<T>({
     <div
       ref={containerRef}
       className={className}
+      data-chat-scroll=""
       style={{
         overflow: "auto",
         position: "relative",

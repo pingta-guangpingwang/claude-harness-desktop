@@ -4,6 +4,7 @@ import { useTheme } from '../../context/ThemeContext'
 import { ChatBubble } from './ChatBubble'
 import { ChatInput } from './ChatInput'
 import { SessionList } from './SessionList'
+import { VirtualList } from '../Shared/VirtualList'
 
 interface FlowStatus {
   middlewareRunning: boolean
@@ -16,12 +17,12 @@ interface FlowStatus {
 interface ChatPanelProps {
   projectPath?: string
   embedded?: boolean
+  allProjectPaths?: string[]
 }
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ projectPath, embedded }) => {
-  const { messages, isConnected, isConnecting, currentProject, rawLogs, launch, send, stop, clear, loadSession } = useChat()
+export const ChatPanel: React.FC<ChatPanelProps> = ({ projectPath, embedded, allProjectPaths }) => {
+  const { messages, isConnected, isConnecting, currentProject, rawLogs, launch, send, stop, clear, loadSession, listSessions } = useChat()
   const { themeId, themes, setTheme } = useTheme()
-  const scrollRef = useRef<HTMLDivElement>(null)
   const logScrollRef = useRef<HTMLDivElement>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [showLogViewer, setShowLogViewer] = useState(false)
@@ -34,18 +35,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ projectPath, embedded }) =
   })
 
   const displayProject = projectPath || currentProject
-
-  // 消息窗口：默认只渲染最近 N 条，向上滚动加载更多
-  const MSG_WINDOW = 120
-  const [windowSize, setWindowSize] = useState(MSG_WINDOW)
-  // 新消息到达时自动扩展窗口到最新
-  useEffect(() => {
-    setWindowSize(prev => Math.max(prev, Math.min(messages.length, MSG_WINDOW)))
-  }, [messages.length])
-  const visibleMessages = useMemo(
-    () => messages.slice(Math.max(0, messages.length - windowSize)),
-    [messages, windowSize],
-  )
 
   // 定时刷新全流程状态
   const refreshFlowStatus = useCallback(async () => {
@@ -71,7 +60,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ projectPath, embedded }) =
   }, [refreshFlowStatus])
 
   // 嵌入模式：仅在 projectPath 变化且与当前项目不一致时自动跟随
-  // 不在挂载时自动 launch —— 父组件 HorseFarm.handleLaunchChat 已负责启动
   useEffect(() => {
     if (embedded && projectPath && currentProject && projectPath !== currentProject && !isConnected && !isConnecting) {
       launchedRef.current = true
@@ -80,38 +68,20 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ projectPath, embedded }) =
   }, [embedded, projectPath, currentProject, isConnected, isConnecting, launch])
 
   // 跟踪用户是否在底部（向上翻阅时不再自动滚动）
-  const handleScroll = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
     isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
   }, [])
 
-  // 智能滚动：仅在用户位于底部时跟随 AI 生成滚动
-  // 但用户自己发送消息时强制滚到底部
+  // followBottom: 用户未手动翻阅时自动跟踪底部
+  const [followBottom, setFollowBottom] = useState(true)
+  // 用户发消息时强制跟随
   useEffect(() => {
     const lastRole = messages[messages.length - 1]?.role
-    if (lastRole === 'user') {
-      isAtBottomRef.current = true
-    }
-    if (!isAtBottomRef.current) return
-    const timer = setTimeout(() => {
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-      }
-    }, 30)
-    return () => clearTimeout(timer)
-  }, [messages.length, messages[messages.length - 1]?.content.length])
-
-  // 切换项目时强制滚到底部
-  useEffect(() => {
-    isAtBottomRef.current = true
-    const timer = setTimeout(() => {
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-      }
-    }, 50)
-    return () => clearTimeout(timer)
-  }, [currentProject])
+    if (lastRole === 'user') setFollowBottom(true)
+  }, [messages.length])
+  // 切换项目时强制跟随到底部
+  useEffect(() => { setFollowBottom(true) }, [displayProject])
 
   const handleLoadSession = (session: ChatSession) => {
     loadSession(session)
@@ -258,28 +228,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ projectPath, embedded }) =
           </p>
         </div>
       ) : (
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
+        <VirtualList
+          key={displayProject || 'no-project'}
+          items={messages}
+          estimateHeight={80}
+          overscan={8}
+          followBottom={followBottom}
+          getItemKey={(msg) => msg.id}
+          renderItem={(msg) => <ChatBubble message={msg} embedded={embedded} />}
           style={{
             flex: 1,
-            overflow: 'auto',
             padding: embedded ? '8px 10px' : '12px 14px',
           }}
-        >
-          {messages.length > MSG_WINDOW && (
-            <div style={{
-              textAlign: 'center', padding: '8px 0',
-              fontSize: 11, color: 'var(--app-text-secondary)', cursor: 'pointer',
-              fontStyle: 'italic', userSelect: 'none',
-            }} onClick={() => setWindowSize(prev => Math.min(prev + MSG_WINDOW, messages.length))}>
-              ... 向上滚动加载更多 ({messages.length - windowSize} 条更早的消息) ...
-            </div>
-          )}
-          {visibleMessages.map(msg => (
-            <ChatBubble key={msg.id} message={msg} embedded={embedded} />
-          ))}
-        </div>
+        />
       )}
 
       {/* 实时日志行 — 双击展开 */}
@@ -383,6 +344,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ projectPath, embedded }) =
       {showHistory && displayProject && (
         <SessionList
           projectPath={displayProject}
+          allProjectPaths={allProjectPaths}
           onLoad={handleLoadSession}
           onClose={() => setShowHistory(false)}
         />

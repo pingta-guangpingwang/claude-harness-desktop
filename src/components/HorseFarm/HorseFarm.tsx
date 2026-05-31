@@ -108,8 +108,21 @@ export default function HorseFarm() {
       setDetailPanel({ type: null, projectPath: null })
       return
     }
-    await chat.launch(projectPath)
+    // 先打开面板
     setDetailPanel({ type: 'chat', projectPath })
+    // 加载历史会话（在 PTY 启动前，确保消息顺序正确）
+    try {
+      const result = await window.electronAPI.sessionList(projectPath)
+      if (result.success && result.sessions?.length > 0) {
+        const last = result.sessions[0]
+        const realMsgs = (last.messages || []).filter((m: any) => m.role === 'user' || m.role === 'assistant')
+        if (realMsgs.length > 0) {
+          chat.loadSession(last)
+        }
+      }
+    } catch {}
+    // 启动 PTY（新消息追加在历史后面）
+    await chat.launch(projectPath)
   }
 
   const handleViewAudit = (projectPath: string) => {
@@ -437,7 +450,7 @@ export default function HorseFarm() {
               />
             )}
             {detailPanel.type === 'chat' && detailPanel.projectPath && (
-              <ChatPanel projectPath={detailPanel.projectPath} embedded />
+              <ChatPanel projectPath={detailPanel.projectPath} embedded allProjectPaths={state.projects.map(p => p.path)} />
             )}
             {detailPanel.type === 'harness' && (
               <HarnessAgentPanel

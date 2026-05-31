@@ -735,7 +735,9 @@ export function ResourceMarket() {
                         <span style={{ fontSize: '10px', color: '#64748b' }}>{REPO_LABELS[item.repo] || item.repo}</span>
                         <span style={{ fontSize: '10px', color: '#475569' }}>·</span>
                         <span style={{ fontSize: '10px', color: '#64748b' }}>{item.category}</span>
-                        {item.tech_stack?.map(t => (
+                        {(Array.isArray(item.tech_stack) ? item.tech_stack
+                          : typeof item.tech_stack === 'string' ? item.tech_stack.split(',').map((s: string) => s.trim()).filter(Boolean)
+                          : []).map((t: string) => (
                           <span key={t} style={{ fontSize: '10px', color: '#475569', background: '#1e293b', padding: '0 4px', borderRadius: '3px' }}>{t}</span>
                         ))}
                         {(item as any).facets && Object.keys(resolveFacetsLocal((item as any).facets)).length > 0

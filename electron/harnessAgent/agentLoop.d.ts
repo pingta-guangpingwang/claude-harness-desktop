@@ -33,6 +33,10 @@ export declare class AgentLoop {
     /** 用户中途插入消息 → 加入队列 + 立即中断当前 API 调用（Claude Code 范式）。
      *  不中断整个 Agent 循环，只中断当前 LLM 请求，让新消息在下一轮立即生效。 */
     queueMessage(msg: string): void;
+    /** 检查并取出排队消息（外部调用，Agent 完成后检查是否需要继续处理） */
+    popPendingMessage(): string | undefined;
+    /** 是否还有排队消息 */
+    hasPendingMessages(): boolean;
     resolvePermission(decision: 'allow' | 'deny' | 'allow_once'): void;
     run(userMessage: string, onEvent: (event: AgentEvent) => void): Promise<string>;
     /** 启动后台上下文预取（非阻塞） */
